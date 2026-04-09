@@ -9,6 +9,12 @@
     *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#eadfbe 0%,var(--bg) 100%);font-family:Georgia,"Times New Roman",serif;color:var(--ink);padding:16px 16px 104px}
     .app{max-width:1280px;margin:0 auto;min-height:calc(100vh - 32px);display:grid;grid-template-rows:auto 1fr;background:rgba(255,250,240,.95);border:2px solid var(--border);border-radius:28px;overflow:hidden;box-shadow:0 18px 50px rgba(76,55,18,.12)}
     .hero{padding:28px 30px 22px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(200,146,31,.14),rgba(255,255,255,.42))}
+    .hero-row{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+    .hero-copy{min-width:0}
+    .hero-mic{display:grid;justify-items:center;gap:8px;flex:0 0 auto}
+    .hero-light{width:72px;height:72px;border-radius:50%;border:3px solid rgba(23,23,23,.08);background:#b8b1a2;box-shadow:inset 0 4px 10px rgba(255,255,255,.35),0 6px 18px rgba(76,55,18,.12);transition:background .18s ease,box-shadow .18s ease,transform .18s ease}
+    .hero-light.live{background:#1bb45f;box-shadow:0 0 0 10px rgba(27,180,95,.16),0 0 30px rgba(27,180,95,.42),inset 0 4px 10px rgba(255,255,255,.35);transform:scale(1.03)}
+    .hero-mic-label{margin:0;font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:#8f6a14;font-weight:700}
     .eyebrow,.label{margin:0 0 8px;font-size:.84rem;letter-spacing:.14em;text-transform:uppercase;color:#8f6a14}
     h1{margin:0;font-size:clamp(2.6rem,6vw,5rem);line-height:.9}.subtitle{margin:12px 0 0;max-width:760px;color:var(--muted);line-height:1.55}
     .main{display:grid;grid-template-columns:minmax(0,1.8fr) 360px;gap:18px;padding:18px}
@@ -35,17 +41,25 @@
     .s-card{border:1px solid var(--border);border-radius:14px;padding:7px 9px;background:rgba(255,255,255,.75);min-width:0}.s-value{margin:0;line-height:1.15;word-break:break-word;font-size:.86rem} #vu{width:100%;height:18px;display:block;border:1px solid var(--border);border-radius:8px;background:rgba(23,23,23,.08)}
     .statusbar .label{margin:0 0 4px;font-size:.62rem;letter-spacing:.1em}
     .statusbar .small{font-size:.68rem;line-height:1.15}
-    .win{position:fixed;inset:0;background:rgba(23,23,23,.45);display:none;align-items:center;justify-content:center;padding:20px}.win.show{display:flex}.win-card{width:min(540px,100%);background:linear-gradient(180deg,#fffaf0,#f1e6cf);border:2px solid var(--border);border-radius:28px;padding:28px;text-align:center;box-shadow:0 18px 50px rgba(76,55,18,.16)} .win-card h2{margin:0 0 12px;font-size:clamp(2.1rem,5vw,3.4rem);line-height:.95} .win-card p{margin:10px 0;color:var(--muted);line-height:1.5}
+    .win{position:fixed;inset:0;background:rgba(23,23,23,.45);display:none;align-items:center;justify-content:center;padding:20px}.win.show{display:flex}.win-card{width:min(540px,100%);background:linear-gradient(180deg,#fffaf0,#f1e6cf);border:2px solid var(--border);border-radius:28px;padding:28px;text-align:center;box-shadow:0 18px 50px rgba(76,55,18,.16)} .win-card h2{margin:0 0 12px;font-size:clamp(2.1rem,5vw,3.4rem);line-height:.95} .win-card p{margin:10px 0;color:var(--muted);line-height:1.5}.win-person{margin:16px 0 8px;font-size:clamp(2rem,6vw,3.8rem);line-height:.92;color:var(--ink);font-weight:700}
     @media (max-width:1100px){.main{grid-template-columns:1fr}.statusbar{grid-template-columns:1fr 1fr}}
-    @media (max-width:720px){body{padding:8px 8px 170px}.app{min-height:calc(100vh - 16px)}.hero{padding:20px}.main{padding:12px}.statusbar{grid-template-columns:1fr;padding:8px;bottom:8px;width:calc(100vw - 16px)}.buttons button{width:100%}}
+    @media (max-width:720px){body{padding:8px 8px 170px}.app{min-height:calc(100vh - 16px)}.hero{padding:20px}.hero-row{align-items:center}.hero-light{width:58px;height:58px}.hero-mic-label{font-size:.66rem}.main{padding:12px}.statusbar{grid-template-columns:1fr;padding:8px;bottom:8px;width:calc(100vw - 16px)}.buttons button{width:100%}}
   </style>
 </head>
 <body>
   <div class="app">
     <header class="hero">
-      <p class="eyebrow">Classroom Guessing Game</p>
-      <h1>Who The Man?</h1>
-      <p class="subtitle">The host picks a mystery person. Click START MIC to capture one yes-or-no question for up to ten seconds.</p>
+      <div class="hero-row">
+        <div class="hero-copy">
+          <p class="eyebrow">Classroom Guessing Game</p>
+          <h1>Who The Man?</h1>
+          <p class="subtitle">The host picks a mystery person. Click START MIC to capture one yes-or-no question for up to ten seconds.</p>
+        </div>
+        <div class="hero-mic" aria-live="polite">
+          <span id="heroLight" class="hero-light"></span>
+          <p id="heroMicLabel" class="hero-mic-label">Mic idle</p>
+        </div>
+      </div>
     </header>
 
     <main class="main">
@@ -58,6 +72,7 @@
           <div class="buttons">
             <button id="startBtn" class="primary" type="button">Start Game</button>
             <button id="micBtn" class="secondary" type="button" disabled>START MIC</button>
+            <button id="guessBtn" class="secondary" type="button" disabled>I want to guess the person</button>
             <button id="revealBtn" class="light" type="button" disabled>Reveal Answer</button>
             <button id="againBtn" class="light" type="button" disabled>Play Again</button>
           </div>
@@ -122,8 +137,8 @@
   <div id="win" class="win" aria-hidden="true">
     <div class="win-card">
       <p class="eyebrow">Round Complete</p>
-      <h2>You got it!</h2>
-      <p id="winPerson">The mystery person was ...</p>
+      <h2 id="winTitle">You got it!</h2>
+      <p id="winPerson" class="win-person">...</p>
       <p id="winMeta">Want to play again?</p>
       <div class="buttons" style="justify-content:center;margin:18px 0 0">
         <button id="overlayAgain" class="primary" type="button">Play Again</button>
@@ -136,13 +151,14 @@
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const synth = window.speechSynthesis;
     const $ = (id) => document.getElementById(id);
-    const startBtn = $("startBtn"), micBtn = $("micBtn"), revealBtn = $("revealBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
+    const startBtn = $("startBtn"), micBtn = $("micBtn"), guessBtn = $("guessBtn"), revealBtn = $("revealBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
     const orb = $("orb"), hostStatus = $("host-status"), hostText = $("hostText"), hostNote = $("hostNote"), heardText = $("heardText"), feedback = $("feedback");
     const qList = $("qList"), count = $("count"), fdot = $("fdot"), fstate = $("fstate"), fdetail = $("fdetail"), permVal = $("permVal"), permMeta = $("permMeta"), devVal = $("devVal"), devMeta = $("devMeta"), vu = $("vu"), vuReadout = $("vuReadout"), keyVal = $("keyVal"), keyMeta = $("keyMeta"), win = $("win"), winPerson = $("winPerson"), winMeta = $("winMeta");
+    const heroLight = $("heroLight"), heroMicLabel = $("heroMicLabel");
     const vtx = vu.getContext("2d");
 
     const FEMALE_NAMES = new Set(["Oprah Winfrey","Marilyn Monroe","Rosa Parks","Amelia Earhart","Eleanor Roosevelt","Madonna","Hillary Clinton","Katharine Hepburn","Billie Holiday","Serena Williams","Meryl Streep","Joan of Arc","Catherine the Great","Ada Lovelace","Cleopatra","Taylor Swift","Zendaya","Billie Eilish","Selena Gomez","Ariana Grande","Kim Kardashian","Beyoncé","Rihanna","Lana Del Rey","Dua Lipa","Adele"]);
-    let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], listenTimeoutId = null, finalizeTimeoutId = null, serverReady = false, lastHandledQuestion = "", latestTranscript = "";
+    let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], listenTimeoutId = null, finalizeTimeoutId = null, serverReady = false, lastHandledQuestion = "", latestTranscript = "", guessMode = false;
     const lifeStatusCache = new Map();
     const personProfileCache = new Map();
 
@@ -150,6 +166,8 @@
       orb.className = "orb"; fdot.className = "fdot";
       if (mode) { orb.classList.add(mode); fdot.classList.add(mode); }
       fstate.textContent = mode || "idle"; fdetail.textContent = detail; hostStatus.textContent = detail;
+      heroLight.classList.toggle("live", mode === "listening");
+      heroMicLabel.textContent = mode === "listening" ? "Mic live" : "Mic idle";
     }
     function setHost(message, note) { hostText.textContent = message; hostNote.textContent = note; }
     function setFeedback(text, tone = "neutral") { feedback.textContent = text; feedback.className = "pill" + (tone === "neutral" ? "" : " " + tone); }
@@ -167,7 +185,13 @@
       questions.unshift({ question, feedback: feedbackText, tone }); renderQuestions();
     }
     function hideWin() { win.classList.remove("show"); win.setAttribute("aria-hidden", "true"); }
-    function showWin() { roundWon = true; gameStarted = false; againBtn.disabled = false; winPerson.textContent = "The mystery person was " + currentPerson + "."; winMeta.textContent = "Play again for a new round."; win.classList.add("show"); win.setAttribute("aria-hidden", "false"); }
+    function showWin(mode = "guessed") {
+      roundWon = true; gameStarted = false; againBtn.disabled = false; revealBtn.disabled = true;
+      $("winTitle").textContent = mode === "revealed" ? "You gave up..." : "You got it!";
+      winPerson.textContent = currentPerson;
+      winMeta.textContent = mode === "revealed" ? "The mystery person was revealed. Play again for a new round." : "The mystery person was correctly guessed. Play again for a new round.";
+      win.classList.add("show"); win.setAttribute("aria-hidden", "false");
+    }
     async function revealAnswer() {
       if (!gameStarted || roundWon || !currentPerson) return;
       stopRecognitionNow();
@@ -180,7 +204,13 @@
       setFeedback("revealed");
       setHost("Answer revealed.", "The mystery person was " + currentPerson + ".");
       setState("", "Round ended. The answer was revealed.");
-      showWin();
+      showWin("revealed");
+    }
+    function armGuessMode() {
+      if (!gameStarted || roundWon || isThinking || isSpeaking) return;
+      guessMode = true;
+      setHost("Guess the person.", "Click START MIC, then say only the person's name.");
+      setState("", "Guess mode armed. Click START MIC and say the name.");
     }
     function speakHost(text) {
       setState("speaking", "Host is speaking.");
@@ -208,6 +238,29 @@
     function detectLocalGuess(question) {
       const guess = normalizeName(question).replace(/^(is it|is this|is the person|could it be|is he|is she|is that|are you)\s+/, "").trim();
       return guess && guess === normalizeName(currentPerson);
+    }
+    function extractGuessName(question) {
+      return normalizeName(question).replace(/^(is it|is this|is the person|could it be|is he|is she|is that|are you|i guess|my guess is|it is|its)\s+/, "").trim();
+    }
+    function editDistance(a, b) {
+      const dp = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+      for (let i = 1; i <= a.length; i += 1) {
+        for (let j = 1; j <= b.length; j += 1) {
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+        }
+      }
+      return dp[a.length][b.length];
+    }
+    function isCloseNameMatch(guess, actual) {
+      if (!guess || !actual) return false;
+      if (guess === actual) return true;
+      if (actual.includes(guess) || guess.includes(actual)) return true;
+      const guessTokens = guess.split(" ");
+      const actualTokens = actual.split(" ");
+      const overlap = guessTokens.filter((token) => actualTokens.includes(token)).length;
+      if (overlap >= Math.max(1, actualTokens.length - 1)) return true;
+      return editDistance(guess, actual) <= Math.max(2, Math.floor(actual.length * 0.18));
     }
     function judgeLocally(question) {
       const q = normalizeName(question);
@@ -358,7 +411,7 @@
         clearListenTimeout();
         clearFinalizeTimeout();
         listenTimeoutId = setTimeout(() => { stopRecognitionNow(); }, 10000);
-        setState("listening", "Listening for one yes-or-no question for up to 10 seconds.");
+        setState("listening", guessMode ? "Listening for a name guess for up to 10 seconds." : "Listening for one yes-or-no question for up to 10 seconds.");
       };
       recognition.onresult = async (e) => {
         let combined = "";
@@ -377,11 +430,12 @@
         clearFinalizeTimeout();
         await restoreMonitoring();
         micBtn.disabled = !gameStarted || roundWon || isThinking || isSpeaking;
+        guessBtn.disabled = !gameStarted || roundWon || isThinking || isSpeaking;
         if (!heardResult && latestTranscript.trim() && gameStarted && !roundWon && !isThinking) {
           await commitTranscript();
           return;
         }
-        if (!heardResult && gameStarted && !roundWon && !isThinking) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Click START MIC and try another short yes-or-no question."); setState("", "No clear question was captured."); await speakHost("I couldn't hear that."); }
+        if (!heardResult && gameStarted && !roundWon && !isThinking) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", guessMode ? "Click START MIC and try saying only the person's name." : "Click START MIC and try another short yes-or-no question."); setState("", "No clear question was captured."); await speakHost("I couldn't hear that."); guessMode = false; }
         else if (!isThinking && !isSpeaking) setState("", gameStarted ? "Ready for your next yes-or-no question." : "Ready for a new round.");
       };
     }
@@ -411,6 +465,29 @@
     async function handleQuestion(question) {
       if (!gameStarted || roundWon) return;
       if (!question) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Try again with a short yes-or-no question."); return; }
+      if (guessMode) {
+        const spokenGuess = extractGuessName(question);
+        const actualName = normalizeName(currentPerson);
+        guessMode = false;
+        if (!spokenGuess) {
+          setFeedback("I couldn't hear that");
+          setHost("I couldn't hear that.", "Click `I want to guess the person` and try saying only the name.");
+          return;
+        }
+        const guessedCorrectly = isCloseNameMatch(spokenGuess, actualName);
+        const feedbackText = guessedCorrectly ? "yes" : "no";
+        setFeedback(feedbackText, feedbackText);
+        addQuestion(question, feedbackText);
+        if (guessedCorrectly) {
+          setHost("yes", "That sounded close enough to the correct name.");
+          await speakHost("Yes! You got it! It was " + currentPerson + ". Do you want to play again?");
+          showWin("guessed");
+        } else {
+          setHost("no", "That guess was not close enough to the mystery person.");
+          await speakHost("No.");
+        }
+        return;
+      }
       const localGuess = detectLocalGuess(question);
       const localJudged = judgeLocally(question);
       const occupationIntent = getOccupationIntent(question);
@@ -445,7 +522,7 @@
           return;
         } finally {
           isThinking = false;
-          if (!roundWon) { micBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+          if (!roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
         }
       }
       if (lifeQuestionIntent) {
@@ -464,7 +541,7 @@
           return;
         } finally {
           isThinking = false;
-          if (!roundWon) { micBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+          if (!roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
         }
       }
       if (!serverReady) {
@@ -478,33 +555,34 @@
       try {
         const judged = await callClaude(question), feedbackText = typeof judged.feedback === "string" ? judged.feedback.trim().toLowerCase() : "that is not a yes or no question", guessedCorrectly = Boolean(judged.guessedCorrectly || (localGuess && feedbackText === "yes"));
         setFeedback(feedbackText, feedbackText === "yes" ? "yes" : feedbackText === "no" ? "no" : "neutral"); addQuestion(question, feedbackText);
-        if (guessedCorrectly) { setHost("yes", "That was the correct guess."); await speakHost("Yes! You got it! It was " + currentPerson + ". Do you want to play again?"); showWin(); return; }
+        if (guessedCorrectly) { setHost("yes", "That was the correct guess."); await speakHost("Yes! You got it! It was " + currentPerson + ". Do you want to play again?"); showWin("guessed"); return; }
         if (feedbackText === "yes" || feedbackText === "no") { setHost(feedbackText, "Click START MIC when you are ready for the next question."); await speakHost(feedbackText); }
         else { setHost("that is not a yes or no question", "Try asking something that can be answered with yes or no."); await speakHost("That is not a yes or no question."); }
       } catch (error) {
         setFeedback("waiting"); setHost("I heard the question, but I could not check it.", error.message);
       } finally {
-        isThinking = false; if (!roundWon) { micBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+        isThinking = false; if (!roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
       }
     }
     async function startRound() {
-      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true; micBtn.disabled = false; revealBtn.disabled = false; lastHandledQuestion = ""; clearListenTimeout();
+      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true; micBtn.disabled = false; guessBtn.disabled = false; revealBtn.disabled = false; guessMode = false; lastHandledQuestion = ""; clearListenTimeout();
       setHost("I have chosen someone famous.", "Click START MIC and ask one yes-or-no question at a time."); await speakHost("I have chosen someone famous. Click start mic and ask me yes or no questions to figure out who it is."); setState("", "Round live. Click START MIC for a 10 second listening window.");
     }
     async function listenForQuestion() {
       if (!recognition || !gameStarted || roundWon || isThinking || isSpeaking) return;
-      heardText.textContent = "Listening..."; heardResult = false; latestTranscript = ""; micBtn.disabled = true;
+      heardText.textContent = guessMode ? "Listening for a name..." : "Listening..."; heardResult = false; latestTranscript = ""; micBtn.disabled = true; guessBtn.disabled = true;
       try { await pauseMonitoringForRecognition(); recognition.start(); }
-      catch (error) { heardText.textContent = "Nothing yet."; setFeedback("I couldn't hear that"); setHost("I couldn't start the microphone.", error.message); setState("error", error.message); micBtn.disabled = false; await restoreMonitoring(); }
+      catch (error) { heardText.textContent = "Nothing yet."; setFeedback("I couldn't hear that"); setHost("I couldn't start the microphone.", error.message); setState("error", error.message); micBtn.disabled = false; guessBtn.disabled = false; await restoreMonitoring(); }
     }
 
     startBtn.addEventListener("click", () => { startRound(); });
     micBtn.addEventListener("click", () => { listenForQuestion(); });
+    guessBtn.addEventListener("click", () => { armGuessMode(); });
     revealBtn.addEventListener("click", () => { revealAnswer(); });
     againBtn.addEventListener("click", () => { startRound(); });
     overlayAgain.addEventListener("click", () => { startRound(); });
 
-    if (!SpeechRecognition) { startBtn.disabled = true; micBtn.disabled = true; revealBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
+    if (!SpeechRecognition) { startBtn.disabled = true; micBtn.disabled = true; guessBtn.disabled = true; revealBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
     else { buildRecognition(); setState("", "Ready for a new round."); }
 
     watchPermission();
