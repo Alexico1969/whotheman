@@ -45,7 +45,7 @@
     <header class="hero">
       <p class="eyebrow">Classroom Guessing Game</p>
       <h1>Who The Man?</h1>
-      <p class="subtitle">The host picks a mystery person. Click START MIC to capture one yes-or-no question for up to five seconds.</p>
+      <p class="subtitle">The host picks a mystery person. Click START MIC to capture one yes-or-no question for up to ten seconds.</p>
     </header>
 
     <main class="main">
@@ -58,6 +58,7 @@
           <div class="buttons">
             <button id="startBtn" class="primary" type="button">Start Game</button>
             <button id="micBtn" class="secondary" type="button" disabled>START MIC</button>
+            <button id="revealBtn" class="light" type="button" disabled>Reveal Answer</button>
             <button id="againBtn" class="light" type="button" disabled>Play Again</button>
           </div>
 
@@ -93,7 +94,7 @@
       <section class="s-card">
         <p class="label">Mic</p>
         <p class="s-value"><span id="fdot" class="fdot" style="display:inline-block;margin-right:8px;vertical-align:middle"></span><span id="fstate">idle</span></p>
-        <p id="fdetail" class="small">Click START MIC to listen for one question for up to 5 seconds.</p>
+        <p id="fdetail" class="small">Click START MIC to listen for one question for up to 10 seconds.</p>
       </section>
       <section class="s-card">
         <p class="label">Permission</p>
@@ -135,7 +136,7 @@
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const synth = window.speechSynthesis;
     const $ = (id) => document.getElementById(id);
-    const startBtn = $("startBtn"), micBtn = $("micBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
+    const startBtn = $("startBtn"), micBtn = $("micBtn"), revealBtn = $("revealBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
     const orb = $("orb"), hostStatus = $("host-status"), hostText = $("hostText"), hostNote = $("hostNote"), heardText = $("heardText"), feedback = $("feedback");
     const qList = $("qList"), count = $("count"), fdot = $("fdot"), fstate = $("fstate"), fdetail = $("fdetail"), permVal = $("permVal"), permMeta = $("permMeta"), devVal = $("devVal"), devMeta = $("devMeta"), vu = $("vu"), vuReadout = $("vuReadout"), keyVal = $("keyVal"), keyMeta = $("keyMeta"), win = $("win"), winPerson = $("winPerson"), winMeta = $("winMeta");
     const vtx = vu.getContext("2d");
@@ -167,6 +168,20 @@
     }
     function hideWin() { win.classList.remove("show"); win.setAttribute("aria-hidden", "true"); }
     function showWin() { roundWon = true; gameStarted = false; againBtn.disabled = false; winPerson.textContent = "The mystery person was " + currentPerson + "."; winMeta.textContent = "Play again for a new round."; win.classList.add("show"); win.setAttribute("aria-hidden", "false"); }
+    async function revealAnswer() {
+      if (!gameStarted || roundWon || !currentPerson) return;
+      stopRecognitionNow();
+      if (synth) synth.cancel();
+      isListening = false;
+      isThinking = false;
+      isSpeaking = false;
+      micBtn.disabled = true;
+      revealBtn.disabled = true;
+      setFeedback("revealed");
+      setHost("Answer revealed.", "The mystery person was " + currentPerson + ".");
+      setState("", "Round ended. The answer was revealed.");
+      showWin();
+    }
     function speakHost(text) {
       setState("speaking", "Host is speaking.");
       return new Promise((resolve) => {
@@ -342,8 +357,8 @@
         latestTranscript = "";
         clearListenTimeout();
         clearFinalizeTimeout();
-        listenTimeoutId = setTimeout(() => { stopRecognitionNow(); }, 5000);
-        setState("listening", "Listening for one yes-or-no question for up to 5 seconds.");
+        listenTimeoutId = setTimeout(() => { stopRecognitionNow(); }, 10000);
+        setState("listening", "Listening for one yes-or-no question for up to 10 seconds.");
       };
       recognition.onresult = async (e) => {
         let combined = "";
@@ -473,8 +488,8 @@
       }
     }
     async function startRound() {
-      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true; micBtn.disabled = false; lastHandledQuestion = ""; clearListenTimeout();
-      setHost("I have chosen someone famous.", "Click START MIC and ask one yes-or-no question at a time."); await speakHost("I have chosen someone famous. Click start mic and ask me yes or no questions to figure out who it is."); setState("", "Round live. Click START MIC for a 5 second listening window.");
+      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true; micBtn.disabled = false; revealBtn.disabled = false; lastHandledQuestion = ""; clearListenTimeout();
+      setHost("I have chosen someone famous.", "Click START MIC and ask one yes-or-no question at a time."); await speakHost("I have chosen someone famous. Click start mic and ask me yes or no questions to figure out who it is."); setState("", "Round live. Click START MIC for a 10 second listening window.");
     }
     async function listenForQuestion() {
       if (!recognition || !gameStarted || roundWon || isThinking || isSpeaking) return;
@@ -485,10 +500,11 @@
 
     startBtn.addEventListener("click", () => { startRound(); });
     micBtn.addEventListener("click", () => { listenForQuestion(); });
+    revealBtn.addEventListener("click", () => { revealAnswer(); });
     againBtn.addEventListener("click", () => { startRound(); });
     overlayAgain.addEventListener("click", () => { startRound(); });
 
-    if (!SpeechRecognition) { startBtn.disabled = true; micBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
+    if (!SpeechRecognition) { startBtn.disabled = true; micBtn.disabled = true; revealBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
     else { buildRecognition(); setState("", "Ready for a new round."); }
 
     watchPermission();
