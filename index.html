@@ -1,1371 +1,331 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Who the Man? / Woman?</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-
-<style>
-  :root {
-    --yellow: #FFE135;
-    --yellow-dark: #C8A800;
-    --black: #0A0A0A;
-    --white: #FAFAF7;
-    --gray: #1C1C1C;
-    --gray-mid: #2E2E2E;
-    --gray-light: #444;
-    --green: #00E676;
-    --red: #FF3D57;
-    --blue: #4FC3F7;
-    --radius: 12px;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: 'DM Sans', sans-serif;
-    background: var(--black);
-    color: var(--white);
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
-
-  /* Scanline overlay for game-show feel */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.07) 2px,
-      rgba(0,0,0,0.07) 4px
-    );
-    pointer-events: none;
-    z-index: 1000;
-  }
-
-  /* Subtle noise texture */
-  body::after {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
-    pointer-events: none;
-    z-index: 999;
-    opacity: 0.6;
-  }
-
-  #layout {
-    display: flex;
-    gap: 1rem;
-    align-items: flex-start;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 1.5rem 1rem 3rem;
-    position: relative;
-    z-index: 1;
-  }
-
-  #app {
-    flex: 1;
-    min-width: 0;
-  }
-
-  /* ---- DEBUG PANEL ---- */
-  #debug-panel {
-    width: 320px;
-    flex-shrink: 0;
-    background: #0d0d0d;
-    border: 1px solid #2a2a2a;
-    border-radius: 14px;
-    overflow: hidden;
-    position: sticky;
-    top: 1rem;
-    max-height: calc(100vh - 2rem);
-    display: flex;
-    flex-direction: column;
-    font-family: 'Courier New', monospace;
-  }
-
-  #debug-header {
-    background: #161616;
-    border-bottom: 1px solid #2a2a2a;
-    padding: 0.6rem 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-  }
-
-  #debug-header span {
-    font-size: 10px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: #00E676;
-    font-weight: 700;
-  }
-
-  #debug-header .dbtn {
-    font-size: 10px;
-    background: none;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 2px 8px;
-    cursor: pointer;
-    color: #888;
-  }
-  #debug-header .dbtn:hover { color: #fff; border-color: #555; }
-  #debug-header .dbtn.paused { color: #FF3D57; border-color: #FF3D57; }
-  #debug-header .dbtn.copied { color: #00E676; border-color: #00E676; }
-  #debug-btns { display: flex; gap: 5px; }
-
-  #debug-log {
-    flex: 1;
-    overflow-y: auto;
-    padding: 0.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    font-size: 11px;
-    line-height: 1.4;
-  }
-
-  #debug-log::-webkit-scrollbar { width: 3px; }
-  #debug-log::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
-
-  .dlog {
-    padding: 4px 8px;
-    border-radius: 4px;
-    word-break: break-word;
-  }
-
-  .dlog-fn   { background: rgba(79,195,247,0.08); color: #4FC3F7; border-left: 2px solid #4FC3F7; }
-  .dlog-mic  { background: rgba(255,225,53,0.08); color: #FFE135; border-left: 2px solid #FFE135; }
-  .dlog-heard{ background: rgba(0,230,118,0.08);  color: #00E676; border-left: 2px solid #00E676; }
-  .dlog-err  { background: rgba(255,61,87,0.10);  color: #FF3D57; border-left: 2px solid #FF3D57; }
-  .dlog-api  { background: rgba(180,100,255,0.08);color: #CE93D8; border-left: 2px solid #CE93D8; }
-  .dlog-info { background: rgba(255,255,255,0.03);color: #888;    border-left: 2px solid #444; }
-
-  .dlog-ts { color: #444; margin-right: 5px; font-size: 10px; }
-
-  /* ---- HEADER ---- */
-  #header {
-    text-align: center;
-    margin-bottom: 2rem;
-    position: relative;
-  }
-
-  #header .eyebrow {
-    font-size: 11px;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    color: var(--yellow);
-    margin-bottom: 6px;
-    font-weight: 500;
-  }
-
-  #header h1 {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: clamp(52px, 10vw, 88px);
-    line-height: 0.9;
-    letter-spacing: 2px;
-    color: var(--white);
-    text-shadow: 4px 4px 0 var(--yellow-dark);
-  }
-
-  #header h1 span {
-    color: var(--yellow);
-  }
-
-  #header .tagline {
-    font-size: 13px;
-    color: #888;
-    margin-top: 10px;
-    letter-spacing: 0.5px;
-  }
-
-  /* Decorative lines */
-  .deco-line {
-    width: 100%;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--yellow), transparent);
-    margin: 1.5rem 0;
-    opacity: 0.4;
-  }
-
-  /* ---- MAIN CARD ---- */
-  #main-card {
-    background: var(--gray);
-    border: 1px solid #333;
-    border-radius: 18px;
-    overflow: hidden;
-    margin-bottom: 1.25rem;
-  }
-
-  /* Host bar */
-  #host-bar {
-    background: var(--gray-mid);
-    border-bottom: 1px solid #333;
-    padding: 0.75rem 1.25rem;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  #host-bar .host-label {
-    font-size: 10px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--yellow);
-    font-weight: 600;
-  }
-
-  #mic-orb {
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    border: 1.5px solid #444;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 16px;
-    flex-shrink: 0;
-    transition: all 0.3s ease;
-    position: relative;
-  }
-
-  #mic-orb.listening {
-    border-color: var(--yellow);
-    box-shadow: 0 0 0 4px rgba(255,225,53,0.15), 0 0 16px rgba(255,225,53,0.2);
-    animation: pulse-yellow 1.5s infinite;
-  }
-
-  #mic-orb.speaking {
-    border-color: var(--green);
-    box-shadow: 0 0 0 4px rgba(0,230,118,0.15), 0 0 16px rgba(0,230,118,0.2);
-    animation: pulse-green 1.2s infinite;
-  }
-
-  @keyframes pulse-yellow {
-    0%, 100% { box-shadow: 0 0 0 4px rgba(255,225,53,0.15); }
-    50% { box-shadow: 0 0 0 8px rgba(255,225,53,0.05); }
-  }
-
-  @keyframes pulse-green {
-    0%, 100% { box-shadow: 0 0 0 4px rgba(0,230,118,0.15); }
-    50% { box-shadow: 0 0 0 8px rgba(0,230,118,0.05); }
-  }
-
-  /* Host speech area */
-  #speech-area {
-    padding: 1.75rem 1.5rem;
-    min-height: 130px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 10px;
-  }
-
-  #host-text {
-    font-size: 20px;
-    line-height: 1.45;
-    font-weight: 500;
-    color: var(--white);
-    transition: opacity 0.2s;
-  }
-
-  #host-sub {
-    font-size: 13px;
-    color: #777;
-  }
-
-  /* Heard display */
-  #heard-bubble {
-    margin: 0 1.5rem 1.25rem;
-    background: rgba(255,225,53,0.07);
-    border: 1px solid rgba(255,225,53,0.2);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 14px;
-    color: var(--yellow);
-    display: none;
-    font-style: italic;
-  }
-
-  #heard-bubble::before {
-    content: '🎤 ';
-    font-style: normal;
-  }
-
-  /* ---- INPUT AREA ---- */
-  #input-area {
-    display: none;
-    flex-direction: column;
-    gap: 10px;
-    margin-bottom: 1.25rem;
-  }
-
-  /* Push-to-talk button */
-  #btn-ptt {
-    width: 100%;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    padding: 20px;
-    border-radius: 12px;
-    border: 2px solid var(--yellow);
-    background: rgba(255,225,53,0.08);
-    color: var(--yellow);
-    cursor: pointer;
-    user-select: none;
-    transition: all 0.15s;
-    letter-spacing: 1px;
-  }
-  #btn-ptt:hover { background: rgba(255,225,53,0.14); }
-  #btn-ptt.recording {
-    background: var(--red);
-    border-color: var(--red);
-    color: #fff;
-    animation: pulse-rec 0.8s infinite;
-  }
-  #btn-ptt:disabled { opacity: 0.35; cursor: default; }
-
-  @keyframes pulse-rec {
-    0%,100% { box-shadow: 0 0 0 0 rgba(255,61,87,0.4); }
-    50%      { box-shadow: 0 0 0 10px rgba(255,61,87,0); }
-  }
-
-  /* Type fallback row */
-  #type-row {
-    display: flex;
-    gap: 8px;
-  }
-
-  #type-input {
-    flex: 1;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    padding: 10px 14px;
-    background: var(--gray);
-    border: 1px solid #444;
-    border-radius: 8px;
-    color: var(--white);
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
-  #type-input:focus { border-color: var(--yellow); }
-  #type-input::placeholder { color: #555; }
-
-  #btn-ask {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 10px 18px;
-    background: var(--yellow);
-    color: var(--black);
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  #btn-ask:disabled { opacity: 0.4; cursor: default; }
-
-  /* ---- CONTROLS ---- */
-  #controls {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 1.25rem;
-  }
-
-  .btn {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 11px 22px;
-    border-radius: 8px;
-    cursor: pointer;
-    border: none;
-    transition: transform 0.1s, opacity 0.2s;
-    letter-spacing: 0.3px;
-  }
-
-  .btn:active { transform: scale(0.97); }
-
-  .btn-primary {
-    background: var(--yellow);
-    color: var(--black);
-  }
-
-  .btn-primary:hover { background: #f5d800; }
-
-  .btn-secondary {
-    background: transparent;
-    color: var(--white);
-    border: 1px solid #444;
-  }
-
-  .btn-secondary:hover { border-color: #666; background: rgba(255,255,255,0.04); }
-
-  .btn-danger {
-    background: transparent;
-    color: var(--red);
-    border: 1px solid rgba(255,61,87,0.4);
-  }
-
-  .btn-danger:hover { background: rgba(255,61,87,0.08); }
-
-  /* ---- Q LOG ---- */
-  #q-log {
-    background: var(--gray);
-    border: 1px solid #333;
-    border-radius: 14px;
-    overflow: hidden;
-    display: none;
-    margin-bottom: 1.25rem;
-  }
-
-  #q-log-header {
-    padding: 0.75rem 1.25rem;
-    background: var(--gray-mid);
-    border-bottom: 1px solid #333;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  #q-log-header span {
-    font-size: 10px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: #888;
-    font-weight: 600;
-  }
-
-  #q-count {
-    font-size: 12px;
-    color: var(--yellow);
-    font-weight: 600;
-    background: rgba(255,225,53,0.1);
-    padding: 2px 10px;
-    border-radius: 20px;
-    border: 1px solid rgba(255,225,53,0.2);
-  }
-
-  #q-list {
-    list-style: none;
-    padding: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    max-height: 220px;
-    overflow-y: auto;
-  }
-
-  #q-list::-webkit-scrollbar { width: 4px; }
-  #q-list::-webkit-scrollbar-track { background: transparent; }
-  #q-list::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-
-  #q-list li {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.03);
-    font-size: 14px;
-    animation: slide-in 0.25s ease;
-  }
-
-  @keyframes slide-in {
-    from { opacity: 0; transform: translateY(-6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .ans-badge {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-
-  .ans-badge.yes { background: rgba(0,230,118,0.15); color: var(--green); }
-  .ans-badge.no { background: rgba(255,61,87,0.15); color: var(--red); }
-
-  .q-text { color: #bbb; line-height: 1.4; }
-
-  /* ---- WIN SCREEN ---- */
-  #win-screen {
-    display: none;
-    background: var(--gray);
-    border: 1px solid #333;
-    border-radius: 18px;
-    padding: 2.5rem 1.5rem;
-    text-align: center;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 1.25rem;
-    animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  @keyframes pop-in {
-    from { opacity: 0; transform: scale(0.9); }
-    to { opacity: 1; transform: scale(1); }
-  }
-
-  #confetti-row {
-    font-size: 32px;
-    letter-spacing: 6px;
-    animation: bounce-row 0.6s ease;
-  }
-
-  @keyframes bounce-row {
-    0% { transform: translateY(10px); opacity: 0; }
-    60% { transform: translateY(-6px); }
-    100% { transform: translateY(0); opacity: 1; }
-  }
-
-  #win-title {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 48px;
-    letter-spacing: 2px;
-    color: var(--yellow);
-    text-shadow: 3px 3px 0 var(--yellow-dark);
-    line-height: 1;
-  }
-
-  #person-img {
-    width: 160px; height: 160px;
-    object-fit: cover;
-    border-radius: 50%;
-    border: 3px solid var(--yellow);
-    display: none;
-    box-shadow: 0 0 0 6px rgba(255,225,53,0.1);
-  }
-
-  #person-name {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 36px;
-    letter-spacing: 2px;
-    color: var(--white);
-  }
-
-  #win-sub {
-    font-size: 13px;
-    color: #777;
-  }
-
-  /* Status bar */
-  #status-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: #555;
-    padding: 0.25rem 0;
-  }
-
-  #status-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: #444;
-    flex-shrink: 0;
-    transition: background 0.3s;
-  }
-
-  #status-dot.listening { background: var(--yellow); }
-  #status-dot.speaking { background: var(--green); }
-  #status-dot.thinking { background: var(--blue); animation: blink 0.8s infinite; }
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-
-  #status-text { transition: color 0.3s; }
-  #status-text.listening { color: var(--yellow); }
-  #status-text.speaking { color: var(--green); }
-  #status-text.thinking { color: var(--blue); }
-
-  /* API key notice */
-  #api-notice {
-    background: rgba(79,195,247,0.07);
-    border: 1px solid rgba(79,195,247,0.2);
-    border-radius: 10px;
-    padding: 1rem 1.25rem;
-    font-size: 13px;
-    color: #999;
-    line-height: 1.6;
-    margin-top: 0.5rem;
-  }
-
-  #api-notice strong { color: var(--blue); font-weight: 600; }
-
-  #api-key-input {
-    width: 100%;
-    margin-top: 10px;
-    padding: 9px 14px;
-    background: var(--black);
-    border: 1px solid #444;
-    border-radius: 8px;
-    color: var(--white);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-
-  #api-key-input:focus { border-color: var(--blue); }
-  #api-key-input::placeholder { color: #555; }
-
-  .key-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-  }
-
-  #btn-save-key {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 9px 16px;
-    background: var(--blue);
-    color: var(--black);
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  #key-status { font-size: 12px; color: var(--green); display: none; margin-top: 6px; }
-
-  /* Footer */
-  #footer {
-    text-align: center;
-    margin-top: 2rem;
-    font-size: 11px;
-    color: #3a3a3a;
-    letter-spacing: 1px;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Who The Man?</title>
+  <style>
+    :root{--bg:#f4eddc;--panel:#fffaf0;--ink:#171717;--muted:#665c4f;--border:#d7c8a9;--gold:#c8921f;--green:#157347;--red:#c03442;--blue:#2563eb}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#eadfbe 0%,var(--bg) 100%);font-family:Georgia,"Times New Roman",serif;color:var(--ink);padding:16px}
+    .app{max-width:1280px;margin:0 auto;min-height:calc(100vh - 32px);display:grid;grid-template-rows:auto 1fr auto;background:rgba(255,250,240,.95);border:2px solid var(--border);border-radius:28px;overflow:hidden;box-shadow:0 18px 50px rgba(76,55,18,.12)}
+    .hero{padding:28px 30px 22px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(200,146,31,.14),rgba(255,255,255,.42))}
+    .eyebrow,.label{margin:0 0 8px;font-size:.84rem;letter-spacing:.14em;text-transform:uppercase;color:#8f6a14}
+    h1{margin:0;font-size:clamp(2.6rem,6vw,5rem);line-height:.9}.subtitle{margin:12px 0 0;max-width:760px;color:var(--muted);line-height:1.55}
+    .main{display:grid;grid-template-columns:minmax(0,1.8fr) 360px;gap:18px;padding:18px}
+    .panel{background:rgba(255,255,255,.78);border:1px solid var(--border);border-radius:24px;overflow:hidden}
+    .pad{padding:18px}
+    .host-top,.log-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border);background:rgba(243,234,214,.72)}
+    .chip{display:inline-flex;align-items:center;gap:10px;font-size:.95rem;font-weight:700;color:#8f6a14;text-transform:uppercase;letter-spacing:.08em}
+    .orb,.fdot{width:12px;height:12px;border-radius:50%;background:#8c8679}.listening{background:var(--green)!important;box-shadow:0 0 0 5px rgba(21,115,71,.14)}.thinking{background:var(--blue)!important;box-shadow:0 0 0 5px rgba(37,99,235,.12)}.speaking{background:var(--gold)!important;box-shadow:0 0 0 5px rgba(200,146,31,.14)}.error{background:var(--red)!important;box-shadow:0 0 0 5px rgba(192,52,66,.12)}
+    .status{color:var(--muted);font-size:.96rem}
+    .buttons{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+    button{border:0;border-radius:999px;padding:12px 20px;font:inherit;font-size:1rem;cursor:pointer;transition:transform .15s ease,opacity .15s ease} button:hover{transform:translateY(-1px)} button:active{transform:translateY(0)} button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+    .primary{background:var(--green);color:#fff}.secondary{background:#efe3c8;color:var(--ink)}.light{background:#faf3e4;color:var(--ink);border:1px solid var(--border)}
+    .bubble,.card{border:1px solid var(--border);border-radius:22px;padding:20px;background:rgba(255,255,255,.84)}
+    .bubble{min-height:220px;display:grid;gap:14px}.host-text{margin:0;font-size:clamp(1.6rem,3vw,2.35rem);line-height:1.2}.host-note,.small{margin:0;color:var(--muted);line-height:1.5}
+    .heard{margin:8px 0 0;font-size:1.05rem;line-height:1.45;min-height:26px}
+    .pill{display:inline-flex;align-items:center;justify-content:center;min-width:160px;padding:11px 16px;border-radius:999px;background:rgba(37,99,235,.12);color:var(--blue);font-weight:700;text-transform:lowercase}
+    .pill.yes{background:rgba(21,115,71,.14);color:var(--green)} .pill.no{background:rgba(192,52,66,.14);color:var(--red)}
+    .count{padding:6px 12px;border-radius:999px;background:rgba(200,146,31,.12);font-weight:700;color:#8f6a14}
+    .q-list{list-style:none;margin:0;padding:16px;display:grid;gap:10px;max-height:560px;overflow:auto}
+    .q-item{border:1px solid var(--border);border-radius:18px;padding:13px;background:rgba(255,255,255,.84);display:grid;gap:8px}.q-item.yes{background:rgba(21,115,71,.08);border-color:rgba(21,115,71,.28)}.q-item.no{background:rgba(192,52,66,.08);border-color:rgba(192,52,66,.28)}.q-item.neutral{background:rgba(37,99,235,.06);border-color:rgba(37,99,235,.22)}
+    .badge{justify-self:start;padding:5px 10px;border-radius:999px;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;background:#ece4d5;color:var(--muted)} .q-item.yes .badge{background:rgba(21,115,71,.16);color:var(--green)} .q-item.no .badge{background:rgba(192,52,66,.16);color:var(--red)} .q-item.neutral .badge{background:rgba(37,99,235,.12);color:var(--blue)}
+    .q-text{margin:0;line-height:1.45}
+    .statusbar{display:grid;grid-template-columns:1fr 1fr 1.2fr 1fr 1fr;gap:12px;padding:14px 18px;border-top:1px solid var(--border);background:rgba(243,234,214,.86)}
+    .s-card{border:1px solid var(--border);border-radius:18px;padding:12px 14px;background:rgba(255,255,255,.75);min-width:0}.s-value{margin:0;line-height:1.4;word-break:break-word} #vu{width:100%;height:42px;display:block;border:1px solid var(--border);border-radius:10px;background:rgba(23,23,23,.08)}
+    .win{position:fixed;inset:0;background:rgba(23,23,23,.45);display:none;align-items:center;justify-content:center;padding:20px}.win.show{display:flex}.win-card{width:min(540px,100%);background:linear-gradient(180deg,#fffaf0,#f1e6cf);border:2px solid var(--border);border-radius:28px;padding:28px;text-align:center;box-shadow:0 18px 50px rgba(76,55,18,.16)} .win-card h2{margin:0 0 12px;font-size:clamp(2.1rem,5vw,3.4rem);line-height:.95} .win-card p{margin:10px 0;color:var(--muted);line-height:1.5}
+    @media (max-width:1100px){.main{grid-template-columns:1fr}.statusbar{grid-template-columns:1fr 1fr}}
+    @media (max-width:720px){body{padding:8px}.app{min-height:calc(100vh - 16px)}.hero{padding:20px}.main{padding:12px}.statusbar{grid-template-columns:1fr;padding:12px}.buttons button{width:100%}}
+  </style>
 </head>
 <body>
+  <div class="app">
+    <header class="hero">
+      <p class="eyebrow">Classroom Guessing Game</p>
+      <h1>Who The Man?</h1>
+      <p class="subtitle">The host picks a mystery person and keeps listening for your next yes-or-no question until you solve the round.</p>
+    </header>
 
-<div id="layout">
-<div id="app">
+    <main class="main">
+      <section class="panel">
+        <div class="host-top">
+          <div class="chip"><span id="orb" class="orb"></span><span>Host NPC</span></div>
+          <div id="host-status" class="status">Ready for a new round.</div>
+        </div>
+        <div class="pad">
+          <div class="buttons">
+            <button id="startBtn" class="primary" type="button">Start Game</button>
+            <button id="againBtn" class="light" type="button" disabled>Play Again</button>
+          </div>
 
-  <div id="header">
-    <div class="eyebrow">Classroom Game</div>
-    <h1>Who the <span>Man?</span><br>/ Woman?</h1>
-    <div class="tagline">Ask yes or no questions — guess the mystery person</div>
+          <section class="bubble">
+            <p class="label">Host says</p>
+            <p id="hostText" class="host-text">Press Start Game and I’ll choose someone famous.</p>
+            <p id="hostNote" class="host-note">Ask one yes-or-no question at a time.</p>
+          </section>
+
+          <section class="card" style="margin-top:16px">
+            <p class="label">Last question heard</p>
+            <p id="heardText" class="heard">Nothing yet.</p>
+          </section>
+
+          <section class="card" style="margin-top:16px">
+            <p class="label">Latest feedback</p>
+            <div id="feedback" class="pill">waiting</div>
+          </section>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="log-top">
+          <p class="label" style="margin:0">Questions asked</p>
+          <span id="count" class="count">0</span>
+        </div>
+        <ol id="qList" class="q-list"></ol>
+        <p class="small" style="padding:0 18px 18px">Green means true, red means false, blue means the host could not score the question.</p>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <section class="s-card">
+        <p class="label">Mic</p>
+        <p class="s-value"><span id="fdot" class="fdot" style="display:inline-block;margin-right:8px;vertical-align:middle"></span><span id="fstate">idle</span></p>
+        <p id="fdetail" class="small">The host listens automatically once the round begins.</p>
+      </section>
+      <section class="s-card">
+        <p class="label">Permission</p>
+        <p id="permVal" class="s-value">Unknown</p>
+        <p id="permMeta" class="small">Waiting for browser permission status.</p>
+      </section>
+      <section class="s-card">
+        <p class="label">Device</p>
+        <p id="devVal" class="s-value">No microphone selected yet.</p>
+        <p id="devMeta" class="small">Chrome reveals the active microphone after permission is granted.</p>
+      </section>
+      <section class="s-card">
+        <p class="label">Input level</p>
+        <canvas id="vu" width="280" height="42"></canvas>
+        <p id="vuReadout" class="small">Level: 0%</p>
+      </section>
+      <section class="s-card">
+        <p class="label">Claude</p>
+        <p id="keyVal" class="s-value">Checking server...</p>
+        <p id="keyMeta" class="small">The game checks a local server endpoint for Claude access.</p>
+      </section>
+    </footer>
   </div>
 
-  <div class="deco-line"></div>
-
-  <!-- API Key Notice (shown if no key stored) -->
-  <div id="api-notice">
-    <strong>API Key Required</strong> — This game calls the Claude API directly.
-    Enter your Anthropic API key below. It's stored only in your browser's local storage and never sent anywhere except api.anthropic.com.
-    <div class="key-row">
-      <input type="password" id="api-key-input" placeholder="sk-ant-..." autocomplete="off" />
-      <button id="btn-save-key" onclick="saveKey()">Save key</button>
-    </div>
-    <div id="key-status">Key saved! You're good to go.</div>
-  </div>
-
-  <!-- Win Screen -->
-  <div id="win-screen">
-    <div id="confetti-row">🎉 🎊 🥳</div>
-    <div id="win-title">That's right!</div>
-    <img id="person-img" src="" alt="Photo of mystery person" />
-    <div id="person-name"></div>
-    <div id="win-sub"></div>
-  </div>
-
-  <!-- Main card -->
-  <div id="main-card">
-    <div id="host-bar">
-      <div id="mic-orb">🎙</div>
-      <span class="host-label">AI Host</span>
-    </div>
-    <div id="speech-area">
-      <div id="host-text">Press <strong>Start Game</strong> to begin a new round!</div>
-      <div id="host-sub"></div>
-    </div>
-    <div id="heard-bubble"></div>
-  </div>
-
-  <!-- Controls -->
-  <div id="controls">
-    <button class="btn btn-primary" id="btn-start" onclick="startGame()">Start game</button>
-    <button class="btn btn-secondary" id="btn-new" onclick="newRound()" style="display:none">New round</button>
-    <button class="btn btn-danger" id="btn-reveal" onclick="revealPerson()" style="display:none">Give up / reveal</button>
-  </div>
-
-  <!-- Input area: push-to-talk + type fallback -->
-  <div id="input-area">
-    <button id="btn-ptt">🎙 HOLD TO SPEAK</button>
-    <div id="type-row">
-      <input type="text" id="type-input" placeholder="Or type your question here..." autocomplete="off" />
-      <button id="btn-ask" onclick="submitTyped()">Ask</button>
-    </div>
-  </div>
-
-  <!-- Status bar -->
-  <div id="status-bar">
-    <div id="status-dot"></div>
-    <span id="status-text">Ready</span>
-  </div>
-
-  <!-- Q Log -->
-  <div id="q-log">
-    <div id="q-log-header">
-      <span>Questions asked</span>
-      <span id="q-count">0 asked</span>
-    </div>
-    <ul id="q-list"></ul>
-  </div>
-
-  <div id="footer">MOLLOY CS &mdash; WHO THE MAN / WOMAN &mdash; CHROME REQUIRED</div>
-
-</div><!-- /#app -->
-
-<!-- Debug Panel -->
-<div id="debug-panel">
-  <div id="debug-header">
-    <span>🔬 Debug Log</span>
-    <div id="debug-btns">
-      <button class="dbtn" id="btn-pause-log" onclick="togglePauseLog()">Pause</button>
-      <button class="dbtn" id="btn-copy-log"  onclick="copyLog()">Copy</button>
-      <button class="dbtn" onclick="clearDebug()">Clear</button>
+  <div id="win" class="win" aria-hidden="true">
+    <div class="win-card">
+      <p class="eyebrow">Round Complete</p>
+      <h2>You got it!</h2>
+      <p id="winPerson">The mystery person was ...</p>
+      <p id="winMeta">Want to play again?</p>
+      <div class="buttons" style="justify-content:center;margin:18px 0 0">
+        <button id="overlayAgain" class="primary" type="button">Play Again</button>
+      </div>
     </div>
   </div>
-  <div id="debug-log"></div>
-</div>
 
-</div><!-- /#layout -->
+  <script>
+    const PEOPLE = Array.from(new Set(["Abraham Lincoln","Martin Luther King Jr.","George Washington","Benjamin Franklin","Elvis Presley","Oprah Winfrey","Thomas Edison","Marilyn Monroe","Franklin D. Roosevelt","Muhammad Ali","Walt Disney","Rosa Parks","Bill Gates","Steve Jobs","Neil Armstrong","Michael Jackson","Mark Twain","Amelia Earhart","Michael Jordan","Eleanor Roosevelt","John F. Kennedy","Tom Hanks","Alexander Hamilton","Madonna","Henry Ford","Hillary Clinton","Steven Spielberg","Babe Ruth","Katharine Hepburn","Orville Wright","Thomas Jefferson","Louis Armstrong","Malcolm X","Billie Holiday","Clint Eastwood","Jimi Hendrix","Serena Williams","Frank Sinatra","Meryl Streep","Leonardo da Vinci","William Shakespeare","Albert Einstein","Winston Churchill","Napoleon Bonaparte","Ludwig van Beethoven","Wolfgang Amadeus Mozart","Galileo Galilei","Charles Darwin","Pablo Picasso","Vincent van Gogh","Joan of Arc","Isaac Newton","Sigmund Freud","Aristotle","Catherine the Great","Cristiano Ronaldo","Ada Lovelace","Marco Polo","Johann Sebastian Bach","Mahatma Gandhi","Nelson Mandela","Cleopatra","Confucius","Taylor Swift","Zendaya","Billie Eilish","Elon Musk","LeBron James","Selena Gomez","Drake","Kanye West","Ariana Grande","Kim Kardashian","Justin Bieber","Timothée Chalamet","Beyoncé","Rihanna","Patrick Mahomes","Mark Zuckerberg","Jeff Bezos","Joe Biden","Donald Trump","Barack Obama","Snoop Dogg","Eminem","Lana Del Rey","Kobe Bryant","Tiger Woods","Kevin Hart","Jake Paul","Harry Styles","Dua Lipa","Ed Sheeran","Adele","David Beckham","Lionel Messi","Lewis Hamilton","Jackie Chan"]));
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const synth = window.speechSynthesis;
+    const $ = (id) => document.getElementById(id);
+    const startBtn = $("startBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
+    const orb = $("orb"), hostStatus = $("host-status"), hostText = $("hostText"), hostNote = $("hostNote"), heardText = $("heardText"), feedback = $("feedback");
+    const qList = $("qList"), count = $("count"), fdot = $("fdot"), fstate = $("fstate"), fdetail = $("fdetail"), permVal = $("permVal"), permMeta = $("permMeta"), devVal = $("devVal"), devMeta = $("devMeta"), vu = $("vu"), vuReadout = $("vuReadout"), keyVal = $("keyVal"), keyMeta = $("keyMeta"), win = $("win"), winPerson = $("winPerson"), winMeta = $("winMeta");
+    const vtx = vu.getContext("2d");
 
-<script type="module">
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-env.allowLocalModels = false;
+    let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], autoListenTimer = null, serverReady = false;
 
-/* ============================================
-   DEBUG LOG
-   ============================================ */
-let logPaused = false;
-
-function dlog(msg, type='info') {
-  if (logPaused) return;
-  const log = document.getElementById('debug-log');
-  const el = document.createElement('div');
-  el.className = 'dlog dlog-' + type;
-  const ts = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
-  el.innerHTML = `<span class="dlog-ts">${ts}</span>${escapeHtml(String(msg))}`;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-}
-
-function togglePauseLog() {
-  logPaused = !logPaused;
-  const btn = document.getElementById('btn-pause-log');
-  btn.textContent = logPaused ? 'Resume' : 'Pause';
-  btn.classList.toggle('paused', logPaused);
-}
-
-function copyLog() {
-  const entries = document.querySelectorAll('#debug-log .dlog');
-  const text = Array.from(entries).map(el => el.textContent).join('\n');
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('btn-copy-log');
-    btn.textContent = 'Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
-  });
-}
-
-function clearDebug() { document.getElementById('debug-log').innerHTML = ''; }
-
-/* ============================================
-   FAMOUS PEOPLE LIST
-   ============================================ */
-const FAMOUS_PEOPLE = [
-  "LeBron James","Taylor Swift","Elon Musk","Oprah Winfrey","Barack Obama",
-  "Beyoncé","Albert Einstein","Serena Williams","Steve Jobs","Malala Yousafzai",
-  "Michael Jordan","Ariana Grande","Bill Gates","Cardi B","Nelson Mandela",
-  "Billie Eilish","Stephen Hawking","Zendaya","Muhammad Ali","Adele",
-  "Cristiano Ronaldo","Rihanna","Marie Curie","Dwayne Johnson","Greta Thunberg",
-  "Harry Styles","Simone Biles","Mark Zuckerberg","Lady Gaga","Tiger Woods",
-  "Kobe Bryant","Emma Watson","Neil deGrasse Tyson","Celine Dion","Lionel Messi",
-  "Kamala Harris","Jeff Bezos","Nicki Minaj","Martin Luther King Jr.","J.K. Rowling"
-];
-
-/* ============================================
-   WHISPER (local STT)
-   ============================================ */
-let whisper = null;
-let whisperReady = false;
-
-async function initWhisper() {
-  dlog('Loading Whisper model — first run downloads ~150 MB, cached after that…', 'api');
-  setStatus('thinking', 'Loading speech model…');
-  const startBtn = document.getElementById('btn-start');
-  if (startBtn) startBtn.disabled = true;
-  try {
-    whisper = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-      progress_callback: p => {
-        if (p.status === 'downloading' && p.total) {
-          const pct = Math.round(p.loaded / p.total * 100);
-          setStatus('thinking', `Downloading model: ${pct}%`);
-          dlog(`Model download ${pct}%`, 'info');
-        }
+    function setState(mode, detail) {
+      orb.className = "orb"; fdot.className = "fdot";
+      if (mode) { orb.classList.add(mode); fdot.classList.add(mode); }
+      fstate.textContent = mode || "idle"; fdetail.textContent = detail; hostStatus.textContent = detail;
+    }
+    function setHost(message, note) { hostText.textContent = message; hostNote.textContent = note; }
+    function setFeedback(text, tone = "neutral") { feedback.textContent = text; feedback.className = "pill" + (tone === "neutral" ? "" : " " + tone); }
+    function renderQuestions() {
+      qList.innerHTML = ""; count.textContent = String(questions.length);
+      for (const item of questions) {
+        const li = document.createElement("li"); li.className = "q-item " + item.tone;
+        const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = item.feedback;
+        const p = document.createElement("p"); p.className = "q-text"; p.textContent = item.question;
+        li.append(badge, p); qList.appendChild(li);
       }
-    });
-    whisperReady = true;
-    dlog('Whisper ready ✓', 'heard');
-    setStatus('', 'Speech model ready — press Start Game!');
-    if (startBtn) startBtn.disabled = false;
-  } catch(e) {
-    dlog(`Whisper load failed: ${e.message}`, 'err');
-    setStatus('', 'Model failed — use the type fallback');
-    if (startBtn) startBtn.disabled = false;
-  }
-}
-
-async function transcribeBlob(blob) {
-  if (!whisperReady) return null;
-  try {
-    // Decode and resample to 16 kHz (Whisper requirement)
-    const arrayBuf = await blob.arrayBuffer();
-    const audioCtx = new AudioContext();
-    const decoded  = await audioCtx.decodeAudioData(arrayBuf);
-    audioCtx.close();
-
-    const targetRate = 16000;
-    const offCtx   = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
-    const src       = offCtx.createBufferSource();
-    src.buffer      = decoded;
-    src.connect(offCtx.destination);
-    src.start(0);
-    const resampled = await offCtx.startRendering();
-    const float32   = resampled.getChannelData(0);
-
-    dlog(`Transcribing ${float32.length} samples (${decoded.duration.toFixed(1)} s)…`, 'api');
-    const result = await whisper(float32, { sampling_rate: targetRate });
-    const text   = result.text.trim();
-    dlog(`Whisper → "${text}"`, 'heard');
-    return text || null;
-  } catch(e) {
-    dlog(`Transcription error: ${e.message}`, 'err');
-    return null;
-  }
-}
-
-/* ============================================
-   STATE
-   ============================================ */
-let currentPerson = null;
-let questionHistory = [];
-let isSpeaking = false;
-let gameActive = false;
-let waitingForQ = false;
-
-let apiKey = localStorage.getItem('wtm_api_key') || '';
-
-const synth = window.speechSynthesis;
-
-/* ============================================
-   API KEY
-   ============================================ */
-function saveKey() {
-  const val = document.getElementById('api-key-input').value.trim();
-  if (!val) return;
-  apiKey = val;
-  localStorage.setItem('wtm_api_key', val);
-  document.getElementById('key-status').style.display = 'block';
-  document.getElementById('api-key-input').value = '••••••••••••••••';
-  setTimeout(() => {
-    document.getElementById('api-notice').style.display = 'none';
-  }, 1500);
-}
-
-function initKeyUI() {
-  if (apiKey) {
-    document.getElementById('api-notice').style.display = 'none';
-  }
-}
-
-/* ============================================
-   PUSH-TO-TALK — MediaRecorder captures audio,
-   Web Speech API transcribes (triggered from
-   the user-gesture click so Chrome allows it)
-   ============================================ */
-let mediaStream   = null;
-let mediaRecorder = null;
-let audioChunks   = [];
-let pttTranscript = null;
-
-async function initMic() {
-  if (mediaStream) return true;
-  try {
-    dlog('getUserMedia — requesting mic...', 'mic');
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    dlog('Mic permission granted', 'mic');
-    return true;
-  } catch(e) {
-    dlog(`Mic denied: ${e.message}`, 'err');
-    setHost('⛔ Mic access denied. Click the 🔒 in the address bar, allow mic, refresh.', '');
-    setStatus('', '⛔ Mic blocked');
-    return false;
-  }
-}
-
-// Called directly from mousedown/touchstart — IS a user gesture
-function startRecording() {
-  if (!gameActive || !waitingForQ || mediaRecorder) return;
-  if (!mediaStream) { dlog('No stream yet', 'err'); return; }
-
-  pttTranscript = null;
-  audioChunks   = [];
-
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-    ? 'audio/webm;codecs=opus' : 'audio/webm';
-  mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
-  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-  mediaRecorder.onstop = onRecordingStop;
-  mediaRecorder.start(100); // collect chunks every 100 ms
-  dlog('MediaRecorder started', 'mic');
-
-  // UI
-  const btn = document.getElementById('btn-ptt');
-  btn.classList.add('recording');
-  btn.textContent = '🔴 RECORDING — RELEASE TO SEND';
-  setMic('listening');
-  setStatus('listening', 'Speak now!');
-}
-
-function stopRecording() {
-  if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
-  dlog('Stopping recording…', 'mic');
-  mediaRecorder.stop();
-  mediaRecorder = null;
-
-  const btn = document.getElementById('btn-ptt');
-  btn.classList.remove('recording');
-  btn.textContent = '⏳ Transcribing…';
-  btn.disabled = true;
-  setMic('idle');
-  setStatus('thinking', 'Transcribing with Whisper…');
-}
-
-async function onRecordingStop() {
-  dlog(`onRecordingStop — ${audioChunks.length} chunks`, 'fn');
-  if (!gameActive) { resetPTT(); return; }
-
-  if (audioChunks.length === 0) {
-    dlog('No audio captured', 'err');
-    setHost("No audio captured — try again or type below.", '');
-    waitingForQ = true; resetPTT(); return;
-  }
-
-  const blob = new Blob(audioChunks, { type: 'audio/webm' });
-  dlog(`Blob: ${(blob.size/1024).toFixed(1)} KB — sending to Whisper`, 'mic');
-
-  const transcript = await transcribeBlob(blob);
-  if (transcript) {
-    waitingForQ = false;
-    showHeard(transcript);
-    setHost(`I heard: <em>"${escapeHtml(transcript)}"</em> — let me think…`, '');
-    handleQuestion(transcript);
-  } else {
-    dlog('Whisper returned empty — type fallback', 'info');
-    setHost("Couldn't make that out — please type your question below!", '');
-    waitingForQ = true; resetPTT();
-  }
-}
-
-function resetPTT() {
-  const btn = document.getElementById('btn-ptt');
-  if (!btn) return;
-  btn.disabled = false;
-  btn.classList.remove('recording');
-  btn.textContent = '🎙 HOLD TO SPEAK';
-  setMic('idle');
-  if (waitingForQ && gameActive) setStatus('listening', 'Ready — hold the button and speak!');
-}
-
-function listenForQuestion() {
-  if (!gameActive || !waitingForQ || isSpeaking) {
-    dlog(`listenForQuestion skipped — gameActive=${gameActive} waitingForQ=${waitingForQ} isSpeaking=${isSpeaking}`, 'info');
-    return;
-  }
-  dlog('listenForQuestion — ready for input', 'fn');
-  document.getElementById('input-area').style.display = 'flex';
-  document.getElementById('type-input').value = '';
-  document.getElementById('btn-ask').disabled = false;
-  resetPTT();
-  setHost('Hold the button and ask your yes/no question!', '');
-}
-
-function killRecognition() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    try { mediaRecorder.stop(); } catch(e) {}
-    mediaRecorder = null;
-  }
-  audioChunks = [];
-  dlog('killRecognition() — stopped', 'info');
-}
-
-function submitTyped() {
-  const inp = document.getElementById('type-input');
-  const q = inp.value.trim();
-  if (!q || !gameActive || !waitingForQ) return;
-  dlog(`Typed: "${q}"`, 'heard');
-  inp.disabled = true;
-  document.getElementById('btn-ask').disabled = true;
-  showHeard(q);
-  handleQuestion(q);
-}
-
-/* ============================================
-   SPEECH SYNTHESIS
-   ============================================ */
-function speak(text, onDone) {
-  dlog(`speak() — "${text.substring(0,60)}${text.length>60?'…':''}"`, 'fn');
-  synth.cancel();
-  isSpeaking = true;
-  setMic('speaking');
-  setStatus('speaking', 'Host is speaking...');
-
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.rate = 1.05;
-  utt.pitch = 1.1;
-  utt.volume = 1;
-
-  // Try to pick a good voice
-  const voices = synth.getVoices();
-  const preferred = voices.find(v => v.lang === 'en-US' && v.name.includes('Google'))
-    || voices.find(v => v.lang === 'en-US');
-  if (preferred) utt.voice = preferred;
-
-  utt.onend = () => {
-    dlog('speak() finished', 'fn');
-    isSpeaking = false;
-    setMic('idle');
-    if (onDone) onDone();
-  };
-  utt.onerror = (e) => {
-    dlog(`speak() error: ${e.error}`, 'err');
-    isSpeaking = false;
-    setMic('idle');
-    if (onDone) onDone();
-  };
-  synth.speak(utt);
-}
-
-/* ============================================
-   UI HELPERS
-   ============================================ */
-function setMic(state) {
-  const el = document.getElementById('mic-orb');
-  el.className = '';
-  if (state === 'listening') { el.className = 'listening'; el.textContent = '🎙'; }
-  else if (state === 'speaking') { el.className = 'speaking'; el.textContent = '🔊'; }
-  else { el.textContent = '🎙'; }
-}
-
-function setHost(text, sub) {
-  document.getElementById('host-text').innerHTML = text;
-  document.getElementById('host-sub').textContent = sub || '';
-}
-
-function setStatus(state, text) {
-  const dot = document.getElementById('status-dot');
-  const txt = document.getElementById('status-text');
-  dot.className = state || '';
-  txt.className = state || '';
-  txt.textContent = text;
-}
-
-function showHeard(text) {
-  const b = document.getElementById('heard-bubble');
-  b.textContent = '';
-  b.style.display = 'block';
-  b.textContent = text;
-}
-
-function hideHeard() {
-  document.getElementById('heard-bubble').style.display = 'none';
-}
-
-/* ============================================
-   GAME LOGIC
-   ============================================ */
-function startGame() {
-  dlog('startGame()', 'fn');
-  if (!apiKey) {
-    dlog('No API key!', 'err');
-    alert('Please enter your Anthropic API key first.');
-    return;
-  }
-  document.getElementById('win-screen').style.display = 'none';
-  document.getElementById('q-log').style.display = 'none';
-  document.getElementById('btn-start').style.display = 'none';
-  questionHistory = [];
-  updateQList();
-  newRound();
-}
-
-function newRound() {
-  dlog('newRound()', 'fn');
-  synth.cancel();
-  waitingForQ = false;
-  gameActive = false;
-  killRecognition();
-
-  currentPerson = FAMOUS_PEOPLE[Math.floor(Math.random() * FAMOUS_PEOPLE.length)];
-  dlog(`Mystery person: ${currentPerson}`, 'api');
-  questionHistory = [];
-  updateQList();
-  hideHeard();
-  document.getElementById('input-area').style.display = 'none';
-
-  document.getElementById('win-screen').style.display = 'none';
-  document.getElementById('q-log').style.display = 'none';
-  document.getElementById('btn-new').style.display = 'inline-block';
-  document.getElementById('btn-reveal').style.display = 'inline-block';
-  setStatus('', 'New round starting...');
-
-  setHost("Alright, I've got someone in mind...", "");
-
-  // Request mic permission during TTS so it's ready when speech ends
-  initMic();
-
-  speak("ALRIGHT! I've got a mystery person locked in! Your job? Ask me YES or NO questions to figure out who it is. Go ahead — fire away!", () => {
-    gameActive = true;
-    waitingForQ = true;
-    document.getElementById('q-log').style.display = 'block';
-    listenForQuestion();
-  });
-}
-
-async function handleQuestion(question) {
-  dlog(`handleQuestion("${question}")`, 'fn');
-  if (!gameActive) { dlog('handleQuestion skipped — game not active', 'info'); return; }
-  waitingForQ = false;
-  setMic('idle');
-  setStatus('thinking', 'Thinking...');
-  setHost("Hmm, let me think...", "");
-
-  const lower = question.toLowerCase();
-  const isGuess = lower.includes("is it") || lower.includes("are you") ||
-    lower.includes("is the person") || lower.includes("is this") ||
-    lower.includes("could it be") || lower.includes("is she") ||
-    lower.includes("is he");
-
-  dlog(`isGuess=${isGuess}`, 'api');
-
-  const prompt = isGuess
-    ? `You are a hype game show host. The secret person is "${currentPerson}". The student just guessed: "${question}". Determine if they named ${currentPerson} or clearly meant ${currentPerson}. If CORRECT: respond starting with CORRECT, then one very short hype sentence (max 15 words). If WRONG: start with NO, then one brief energetic sentence — do not give away the name. Total response max 20 words.`
-    : `You are a hype game show host. The secret mystery person is "${currentPerson}". Student asked: "${question}". Answer YES or NO (whichever is accurate), followed by ONE short energetic sentence of flavor. Max 20 words total. Never say the person's name.`;
-
-  try {
-    dlog('→ calling Claude API...', 'api');
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: "claude-opus-4-5",
-        max_tokens: 80,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      dlog(`API HTTP error ${res.status}: ${err.error?.message}`, 'err');
-      setHost("API error: " + (err.error?.message || res.status), "");
-      setStatus('', 'Error — check your API key');
-      waitingForQ = true;
-      listenForQuestion();
-      return;
+    }
+    function addQuestion(question, feedbackText) {
+      const tone = feedbackText === "yes" ? "yes" : feedbackText === "no" ? "no" : "neutral";
+      questions.unshift({ question, feedback: feedbackText, tone }); renderQuestions();
+    }
+    function hideWin() { win.classList.remove("show"); win.setAttribute("aria-hidden", "true"); }
+    function showWin() { roundWon = true; gameStarted = false; againBtn.disabled = false; winPerson.textContent = "The mystery person was " + currentPerson + "."; winMeta.textContent = "Play again for a new round."; win.classList.add("show"); win.setAttribute("aria-hidden", "false"); }
+    function speakHost(text) {
+      setState("speaking", "Host is speaking.");
+      return new Promise((resolve) => {
+        if (!synth || typeof SpeechSynthesisUtterance === "undefined") { resolve(); return; }
+        synth.cancel(); isSpeaking = true;
+        const u = new SpeechSynthesisUtterance(text); u.rate = 1; u.pitch = 1.03;
+        const done = () => { isSpeaking = false; if (!isListening && !isThinking) setState("", gameStarted ? "Ready for your next yes-or-no question." : "Ready for a new round."); resolve(); };
+        u.onend = done; u.onerror = done; synth.speak(u);
+      });
+    }
+    function normalizeName(value) { return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim(); }
+    function cleanupTranscript(value) {
+      return value
+        .replace(/\bis it the man\b/gi, "is it a man")
+        .replace(/\bis it the woman\b/gi, "is it a woman")
+        .replace(/\bare they the man\b/gi, "are they a man")
+        .replace(/\bare they the woman\b/gi, "are they a woman")
+        .trim();
+    }
+    function isYesNoQuestion(question) {
+      const q = normalizeName(question);
+      return /^(is|are|was|were|do|does|did|can|could|would|will|has|have|had|am|should|isnt|arent|wasnt|werent|doesnt|dont|didnt|cant|couldnt|wouldnt|wont|hasnt|havent|hadnt|shouldnt)\b/.test(q);
+    }
+    function detectLocalGuess(question) {
+      const guess = normalizeName(question).replace(/^(is it|is this|is the person|could it be|is he|is she|is that|are you)\s+/, "").trim();
+      return guess && guess === normalizeName(currentPerson);
+    }
+    function queueAutoListen(delay = 650) {
+      clearTimeout(autoListenTimer);
+      if (!gameStarted || roundWon) return;
+      autoListenTimer = setTimeout(() => { listenForQuestion(); }, delay);
     }
 
-    const data = await res.json();
-    const reply = data.content?.[0]?.text?.trim() || "Hmm, tricky one!";
-    dlog(`← Claude replied: "${reply}"`, 'api');
-    const upperReply = reply.toUpperCase();
-    const isCorrect = upperReply.startsWith("CORRECT");
-    const answerYes = upperReply.startsWith("YES");
-
-    setHost(reply, "");
-
-    if (isCorrect) {
-      handleWin();
-      return;
+    function drawVu(level = 0) {
+      vtx.clearRect(0, 0, vu.width, vu.height); vtx.fillStyle = "rgba(23,23,23,.08)"; vtx.fillRect(0, 0, vu.width, vu.height);
+      const grad = vtx.createLinearGradient(0, 0, vu.width, 0); grad.addColorStop(0, "#157347"); grad.addColorStop(.75, "#c8921f"); grad.addColorStop(1, "#c03442");
+      const bars = 24, gap = 4, barWidth = (vu.width - gap * (bars + 1)) / bars, active = Math.round(level * bars);
+      for (let i = 0; i < bars; i += 1) { const h = 8 + ((i + 1) / bars) * (vu.height - 14), x = gap + i * (barWidth + gap), y = vu.height - h - 3; vtx.fillStyle = i < active ? grad : "rgba(23,23,23,.14)"; vtx.fillRect(x, y, barWidth, h); }
+      vuReadout.textContent = "Level: " + Math.round(level * 100) + "%";
+    }
+    function stopVu() { if (frameId) cancelAnimationFrame(frameId); frameId = null; drawVu(0); }
+    function startVu() {
+      if (!analyser) { drawVu(0); return; }
+      const data = new Uint8Array(analyser.fftSize); stopVu();
+      const tick = () => { analyser.getByteTimeDomainData(data); let sum = 0; for (let i = 0; i < data.length; i += 1) { const v = (data[i] - 128) / 128; sum += v * v; } drawVu(Math.min(1, Math.sqrt(sum / data.length) * 3.4)); frameId = requestAnimationFrame(tick); };
+      tick();
+    }
+    function stopMonitoring() {
+      stopVu();
+      if (sourceNode) { try { sourceNode.disconnect(); } catch (error) {} sourceNode = null; }
+      analyser = null;
+      if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+      if (audioContext) { audioContext.close().catch(() => {}); audioContext = null; }
+    }
+    async function refreshDevice() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) { devVal.textContent = "Unavailable"; devMeta.textContent = "This browser cannot enumerate audio devices."; return; }
+      const devices = await navigator.mediaDevices.enumerateDevices(), track = micStream ? micStream.getAudioTracks()[0] : null, deviceId = track ? track.getSettings().deviceId : "", active = devices.find((d) => d.kind === "audioinput" && d.deviceId === deviceId) || devices.find((d) => d.kind === "audioinput");
+      if (!active) { devVal.textContent = "No microphone"; devMeta.textContent = "Chrome did not report an audio input device."; return; }
+      devVal.textContent = active.label || "Microphone label hidden until permission is granted"; devMeta.textContent = "This is the microphone Chrome is exposing to the page.";
+    }
+    async function ensureMonitoring() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("Microphone access is not available in this browser.");
+      if (!micStream) { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); await refreshDevice(); }
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) { devMeta.textContent = "Web Audio is unavailable, so the level meter cannot be shown."; return; }
+      if (!audioContext) audioContext = new AC(); if (audioContext.state === "suspended") await audioContext.resume();
+      if (!sourceNode) { sourceNode = audioContext.createMediaStreamSource(micStream); analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = .86; sourceNode.connect(analyser); }
+      startVu();
+    }
+    async function pauseMonitoringForRecognition() { await ensureMonitoring(); monitoringPaused = true; stopMonitoring(); devMeta.textContent = "The live meter pauses while Chrome listens for a question."; vuReadout.textContent = "Level: paused while listening"; }
+    async function restoreMonitoring() { if (!monitoringPaused) return; monitoringPaused = false; try { await ensureMonitoring(); devMeta.textContent = "Live meter restored. Ready for the next question."; } catch (error) { fdetail.textContent = error.message; } }
+    async function watchPermission() {
+      if (!navigator.permissions || !navigator.permissions.query) { permVal.textContent = "Unknown"; permMeta.textContent = "This browser does not expose microphone permission status."; return; }
+      try { const status = await navigator.permissions.query({ name: "microphone" }); const sync = () => { permVal.textContent = status.state; permMeta.textContent = "Browser-reported microphone permission state."; }; status.onchange = sync; sync(); } catch (error) { permVal.textContent = "Unknown"; permMeta.textContent = "Chrome would not expose microphone permission through the Permissions API."; }
+    }
+    function buildRecognition() {
+      if (!SpeechRecognition) return;
+      recognition = new SpeechRecognition(); recognition.lang = "en-US"; recognition.continuous = false; recognition.interimResults = false; recognition.maxAlternatives = 1;
+      recognition.onstart = () => { isListening = true; heardResult = false; setState("listening", "Listening for one yes-or-no question."); };
+      recognition.onresult = async (e) => { heardResult = true; const transcript = cleanupTranscript(e.results[0][0].transcript.trim()); heardText.textContent = transcript || "Nothing heard."; await handleQuestion(transcript); };
+      recognition.onerror = () => { isListening = false; };
+      recognition.onend = async () => {
+        isListening = false; await restoreMonitoring();
+        if (!heardResult && gameStarted && !roundWon && !isThinking) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Try another short yes-or-no question."); setState("", "No clear question was captured."); await speakHost("I couldn't hear that."); queueAutoListen(); }
+        else if (!isThinking && !isSpeaking) setState("", gameStarted ? "Ready for your next yes-or-no question." : "Ready for a new round.");
+      };
+    }
+    async function checkServerConfig() {
+      try {
+        const res = await fetch("/api/config");
+        if (!res.ok) throw new Error("Config endpoint unavailable");
+        const data = await res.json();
+        serverReady = Boolean(data.hasClaudeKey);
+        keyVal.textContent = serverReady ? "Configured" : "Missing";
+        keyMeta.textContent = serverReady ? "Claude is available through the local server." : "Start the app through the local server with `CLAUDE_KEY` set.";
+      } catch (error) {
+        serverReady = false;
+        keyVal.textContent = "Server not running";
+        keyMeta.textContent = "Run `node server.js` so the browser can use `CLAUDE_KEY` through the backend.";
+      }
+    }
+    async function callClaude(question) {
+      const res = await fetch("/api/judge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPerson, question })
+      });
+      if (!res.ok) { const payload = await res.json().catch(() => ({})); throw new Error(payload.error?.message || ("Claude error " + res.status)); }
+      return res.json();
+    }
+    async function handleQuestion(question) {
+      if (!gameStarted || roundWon) return;
+      if (!question) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Try again with a short yes-or-no question."); return; }
+      const localGuess = detectLocalGuess(question);
+      if (!isYesNoQuestion(question) && !localGuess) {
+        setFeedback("that is not a yes or no question");
+        addQuestion(question, "that is not a yes or no question");
+        setHost("that is not a yes or no question", "Try asking something that starts with words like is, are, does, can, or did.");
+        await speakHost("That is not a yes or no question.");
+        queueAutoListen();
+        return;
+      }
+      if (!serverReady) {
+        setFeedback("I couldn't hear that");
+        setHost("Claude is not configured yet.", "Run `node server.js` from this folder with your `CLAUDE_KEY` environment variable set.");
+        keyVal.textContent = "Missing";
+        keyMeta.textContent = "The browser can only use the key through the local `/api/judge` backend.";
+        queueAutoListen();
+        return;
+      }
+      isThinking = true; setState("thinking", "Checking your question with Claude.");
+      try {
+        const judged = await callClaude(question), feedbackText = typeof judged.feedback === "string" ? judged.feedback.trim().toLowerCase() : "that is not a yes or no question", guessedCorrectly = Boolean(judged.guessedCorrectly || (localGuess && feedbackText === "yes"));
+        setFeedback(feedbackText, feedbackText === "yes" ? "yes" : feedbackText === "no" ? "no" : "neutral"); addQuestion(question, feedbackText);
+        if (guessedCorrectly) { setHost("yes", "That was the correct guess."); await speakHost("Yes! You got it! It was " + currentPerson + ". Do you want to play again?"); showWin(); return; }
+        if (feedbackText === "yes" || feedbackText === "no") { setHost(feedbackText, "Ask another yes-or-no question whenever you're ready."); await speakHost(feedbackText); queueAutoListen(); }
+        else { setHost("that is not a yes or no question", "Try asking something that can be answered with yes or no."); await speakHost("That is not a yes or no question."); queueAutoListen(); }
+      } catch (error) {
+        setFeedback("I couldn't hear that"); setHost("Something went wrong while checking that question.", error.message);
+        queueAutoListen();
+      } finally {
+        isThinking = false; if (!roundWon) setState("", "Ready for your next yes-or-no question.");
+      }
+    }
+    async function startRound() {
+      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true;
+      setHost("I have chosen someone famous.", "Ask one yes-or-no question at a time with the microphone."); await speakHost("I have chosen someone famous. Ask me yes or no questions to figure out who it is."); setState("", "Round live. Listening for your first yes-or-no question."); queueAutoListen(500);
+    }
+    async function listenForQuestion() {
+      if (!recognition || !gameStarted || roundWon || isThinking || isSpeaking) return;
+      heardText.textContent = "Listening..."; heardResult = false;
+      try { await pauseMonitoringForRecognition(); recognition.start(); }
+      catch (error) { heardText.textContent = "Nothing yet."; setFeedback("I couldn't hear that"); setHost("I couldn't start the microphone.", error.message); setState("error", error.message); await restoreMonitoring(); queueAutoListen(1200); }
     }
 
-    questionHistory.push({
-      q: question,
-      a: answerYes ? 'YES' : 'NO',
-      cls: answerYes ? 'yes' : 'no'
-    });
-    updateQList();
+    startBtn.addEventListener("click", () => { startRound(); });
+    againBtn.addEventListener("click", () => { startRound(); });
+    overlayAgain.addEventListener("click", () => { startRound(); });
 
-    speak(reply, () => {
-      waitingForQ = true;
-      listenForQuestion();
-    });
+    if (!SpeechRecognition) { startBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
+    else { buildRecognition(); setState("", "Ready for a new round."); }
 
-  } catch(err) {
-    dlog(`fetch exception: ${err.message}`, 'err');
-    setHost("Network error — check your connection.", "");
-    setStatus('', 'Error');
-    waitingForQ = true;
-    setTimeout(() => listenForQuestion(), 1500);
-  }
-}
-
-function handleWin() {
-  gameActive = false;
-  waitingForQ = false;
-  synth.cancel();
-  killRecognition();
-  document.getElementById('input-area').style.display = 'none';
-
-  const winLines = [
-    `YESSS! You got it! The mystery person was ${currentPerson}!`,
-    `INCREDIBLE! That's right — ${currentPerson}! The crowd goes absolutely WILD!`,
-    `OH MY GOODNESS! You nailed it! It WAS ${currentPerson}! What a brain!`
-  ];
-  const line = winLines[Math.floor(Math.random() * winLines.length)];
-
-  setHost(line, "");
-  document.getElementById('q-log').style.display = 'none';
-  hideHeard();
-
-  // Reset win screen
-  document.getElementById('win-title').textContent = "That's right!";
-  document.getElementById('confetti-row').textContent = '🎉 🎊 🥳';
-  document.getElementById('win-screen').style.display = 'flex';
-  document.getElementById('person-name').textContent = currentPerson;
-  document.getElementById('win-sub').textContent = `Solved in ${questionHistory.length} question${questionHistory.length !== 1 ? 's' : ''}!`;
-  document.getElementById('person-img').style.display = 'none';
-
-  fetchWikipediaImage(currentPerson);
-  speak(line, () => setStatus('', 'Round complete!'));
-}
-
-function revealPerson() {
-  gameActive = false;
-  waitingForQ = false;
-  killRecognition();
-  synth.cancel();
-  hideHeard();
-  document.getElementById('input-area').style.display = 'none';
-
-  const msg = `No worries! The mystery person was... ${currentPerson}! Better luck next round!`;
-  setHost(msg, "");
-
-  document.getElementById('win-screen').style.display = 'flex';
-  document.getElementById('confetti-row').textContent = '🤔 💭 🎙';
-  document.getElementById('win-title').textContent = 'The answer was...';
-  document.getElementById('person-name').textContent = currentPerson;
-  document.getElementById('win-sub').textContent = `Better luck next round!`;
-  document.getElementById('person-img').style.display = 'none';
-  document.getElementById('q-log').style.display = 'none';
-
-  fetchWikipediaImage(currentPerson);
-  speak(msg, () => setStatus('', 'Reveal done'));
-}
-
-/* ============================================
-   WIKIPEDIA IMAGE
-   ============================================ */
-async function fetchWikipediaImage(name) {
-  try {
-    const res = await fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`
-    );
-    const data = await res.json();
-    if (data.thumbnail?.source) {
-      const img = document.getElementById('person-img');
-      img.src = data.thumbnail.source;
-      img.style.display = 'block';
-    }
-  } catch(e) {}
-}
-
-/* ============================================
-   Q LIST
-   ============================================ */
-function updateQList() {
-  const list = document.getElementById('q-list');
-  const badge = document.getElementById('q-count');
-  list.innerHTML = '';
-  badge.textContent = `${questionHistory.length} asked`;
-  questionHistory.forEach(item => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="ans-badge ${item.cls}">${item.a}</span><span class="q-text">${escapeHtml(item.q)}</span>`;
-    list.appendChild(li);
-  });
-  document.getElementById('q-list').scrollTop = 9999;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-/* ============================================
-   INIT
-   ============================================ */
-// Expose functions called from HTML onclick attributes (required for ES modules)
-Object.assign(window, {
-  saveKey, startGame, newRound, revealPerson,
-  togglePauseLog, copyLog, clearDebug, submitTyped
-});
-
-initKeyUI();
-dlog(`Page loaded — MediaRecorder: ${typeof MediaRecorder !== 'undefined' ? 'supported' : 'NOT SUPPORTED'}`, 'info');
-dlog(`API key: ${apiKey ? 'present' : 'MISSING'}`, 'info');
-
-// Start loading Whisper in the background immediately
-initWhisper();
-
-// Wire push-to-talk button (mouse + touch)
-const pttBtn = document.getElementById('btn-ptt');
-pttBtn.addEventListener('mousedown',  e => { e.preventDefault(); startRecording(); });
-pttBtn.addEventListener('mouseup',    e => { e.preventDefault(); stopRecording(); });
-pttBtn.addEventListener('mouseleave', e => { if (mediaRecorder) stopRecording(); });
-pttBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); }, { passive: false });
-pttBtn.addEventListener('touchend',   e => { e.preventDefault(); stopRecording(); },  { passive: false });
-
-// Enter key on type input
-document.getElementById('type-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') submitTyped();
-});
-
-document.getElementById('type-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') submitTyped();
-});
-
-// Preload voices
-if (synth.onvoiceschanged !== undefined) {
-  synth.onvoiceschanged = () => synth.getVoices();
-}
-</script>
+    watchPermission();
+    checkServerConfig();
+    ensureMonitoring().catch((error) => { fdetail.textContent = error.message; });
+    drawVu(0);
+  </script>
 </body>
 </html>
