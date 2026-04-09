@@ -43,7 +43,7 @@
     <header class="hero">
       <p class="eyebrow">Classroom Guessing Game</p>
       <h1>Who The Man?</h1>
-      <p class="subtitle">The host picks a mystery person and keeps listening for your next yes-or-no question until you solve the round.</p>
+      <p class="subtitle">The host picks a mystery person. Click START MIC to capture one yes-or-no question for up to five seconds.</p>
     </header>
 
     <main class="main">
@@ -55,6 +55,7 @@
         <div class="pad">
           <div class="buttons">
             <button id="startBtn" class="primary" type="button">Start Game</button>
+            <button id="micBtn" class="secondary" type="button" disabled>START MIC</button>
             <button id="againBtn" class="light" type="button" disabled>Play Again</button>
           </div>
 
@@ -90,7 +91,7 @@
       <section class="s-card">
         <p class="label">Mic</p>
         <p class="s-value"><span id="fdot" class="fdot" style="display:inline-block;margin-right:8px;vertical-align:middle"></span><span id="fstate">idle</span></p>
-        <p id="fdetail" class="small">The host listens automatically once the round begins.</p>
+        <p id="fdetail" class="small">Click START MIC to listen for one question for up to 5 seconds.</p>
       </section>
       <section class="s-card">
         <p class="label">Permission</p>
@@ -132,13 +133,13 @@
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const synth = window.speechSynthesis;
     const $ = (id) => document.getElementById(id);
-    const startBtn = $("startBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
+    const startBtn = $("startBtn"), micBtn = $("micBtn"), againBtn = $("againBtn"), overlayAgain = $("overlayAgain");
     const orb = $("orb"), hostStatus = $("host-status"), hostText = $("hostText"), hostNote = $("hostNote"), heardText = $("heardText"), feedback = $("feedback");
     const qList = $("qList"), count = $("count"), fdot = $("fdot"), fstate = $("fstate"), fdetail = $("fdetail"), permVal = $("permVal"), permMeta = $("permMeta"), devVal = $("devVal"), devMeta = $("devMeta"), vu = $("vu"), vuReadout = $("vuReadout"), keyVal = $("keyVal"), keyMeta = $("keyMeta"), win = $("win"), winPerson = $("winPerson"), winMeta = $("winMeta");
     const vtx = vu.getContext("2d");
 
     const FEMALE_NAMES = new Set(["Oprah Winfrey","Marilyn Monroe","Rosa Parks","Amelia Earhart","Eleanor Roosevelt","Madonna","Hillary Clinton","Katharine Hepburn","Billie Holiday","Serena Williams","Meryl Streep","Joan of Arc","Catherine the Great","Ada Lovelace","Cleopatra","Taylor Swift","Zendaya","Billie Eilish","Selena Gomez","Ariana Grande","Kim Kardashian","Beyoncé","Rihanna","Lana Del Rey","Dua Lipa","Adele"]);
-    let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], autoListenTimer = null, serverReady = false;
+    let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], listenTimeoutId = null, serverReady = false, lastHandledQuestion = "";
 
     function setState(mode, detail) {
       orb.className = "orb"; fdot.className = "fdot";
@@ -196,10 +197,17 @@
       if (/^(is it|is this|is the person|is he|is she).*(a woman|female)$/.test(q)) return { feedback: isFemale ? "yes" : "no", guessedCorrectly: false };
       return null;
     }
-    function queueAutoListen(delay = 650) {
-      clearTimeout(autoListenTimer);
-      if (!gameStarted || roundWon) return;
-      autoListenTimer = setTimeout(() => { listenForQuestion(); }, delay);
+    function clearListenTimeout() {
+      if (listenTimeoutId) {
+        clearTimeout(listenTimeoutId);
+        listenTimeoutId = null;
+      }
+    }
+    function stopRecognitionNow() {
+      clearListenTimeout();
+      if (recognition && isListening) {
+        try { recognition.stop(); } catch (error) {}
+      }
     }
 
     function drawVu(level = 0) {
@@ -246,12 +254,30 @@
     function buildRecognition() {
       if (!SpeechRecognition) return;
       recognition = new SpeechRecognition(); recognition.lang = "en-US"; recognition.continuous = false; recognition.interimResults = false; recognition.maxAlternatives = 1;
-      recognition.onstart = () => { isListening = true; heardResult = false; setState("listening", "Listening for one yes-or-no question."); };
-      recognition.onresult = async (e) => { heardResult = true; const transcript = cleanupTranscript(e.results[0][0].transcript.trim()); heardText.textContent = transcript || "Nothing heard."; await handleQuestion(transcript); };
+      recognition.onstart = () => {
+        isListening = true;
+        heardResult = false;
+        clearListenTimeout();
+        listenTimeoutId = setTimeout(() => { stopRecognitionNow(); }, 5000);
+        setState("listening", "Listening for one yes-or-no question for up to 5 seconds.");
+      };
+      recognition.onresult = async (e) => {
+        const transcript = cleanupTranscript(e.results[0][0].transcript.trim());
+        if (!transcript) return;
+        if (transcript === lastHandledQuestion) return;
+        heardResult = true;
+        lastHandledQuestion = transcript;
+        heardText.textContent = transcript;
+        stopRecognitionNow();
+        await handleQuestion(transcript);
+      };
       recognition.onerror = () => { isListening = false; };
       recognition.onend = async () => {
-        isListening = false; await restoreMonitoring();
-        if (!heardResult && gameStarted && !roundWon && !isThinking) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Try another short yes-or-no question."); setState("", "No clear question was captured."); await speakHost("I couldn't hear that."); queueAutoListen(); }
+        isListening = false;
+        clearListenTimeout();
+        await restoreMonitoring();
+        micBtn.disabled = !gameStarted || roundWon || isThinking || isSpeaking;
+        if (!heardResult && gameStarted && !roundWon && !isThinking) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Click START MIC and try another short yes-or-no question."); setState("", "No clear question was captured."); await speakHost("I couldn't hear that."); }
         else if (!isThinking && !isSpeaking) setState("", gameStarted ? "Ready for your next yes-or-no question." : "Ready for a new round.");
       };
     }
@@ -288,7 +314,6 @@
         addQuestion(question, "that is not a yes or no question");
         setHost("that is not a yes or no question", "Try asking something that starts with words like is, are, does, can, or did.");
         await speakHost("That is not a yes or no question.");
-        queueAutoListen();
         return;
       }
       if (localJudged) {
@@ -296,7 +321,6 @@
         addQuestion(question, localJudged.feedback);
         setHost(localJudged.feedback, "That exact question was processed locally.");
         await speakHost(localJudged.feedback);
-        queueAutoListen();
         return;
       }
       if (!serverReady) {
@@ -304,39 +328,38 @@
         setHost("Claude is not configured yet.", "Add `CLAUDE_KEY` in Netlify environment variables for Functions and redeploy the site.");
         keyVal.textContent = "Missing";
         keyMeta.textContent = "The browser can only use the key through the Netlify `/api/judge` function.";
-        queueAutoListen();
         return;
       }
-      isThinking = true; setState("thinking", "Checking your question with Claude.");
+      isThinking = true; micBtn.disabled = true; setState("thinking", "Checking your question with Claude.");
       try {
         const judged = await callClaude(question), feedbackText = typeof judged.feedback === "string" ? judged.feedback.trim().toLowerCase() : "that is not a yes or no question", guessedCorrectly = Boolean(judged.guessedCorrectly || (localGuess && feedbackText === "yes"));
         setFeedback(feedbackText, feedbackText === "yes" ? "yes" : feedbackText === "no" ? "no" : "neutral"); addQuestion(question, feedbackText);
         if (guessedCorrectly) { setHost("yes", "That was the correct guess."); await speakHost("Yes! You got it! It was " + currentPerson + ". Do you want to play again?"); showWin(); return; }
-        if (feedbackText === "yes" || feedbackText === "no") { setHost(feedbackText, "Ask another yes-or-no question whenever you're ready."); await speakHost(feedbackText); queueAutoListen(); }
-        else { setHost("that is not a yes or no question", "Try asking something that can be answered with yes or no."); await speakHost("That is not a yes or no question."); queueAutoListen(); }
+        if (feedbackText === "yes" || feedbackText === "no") { setHost(feedbackText, "Click START MIC when you are ready for the next question."); await speakHost(feedbackText); }
+        else { setHost("that is not a yes or no question", "Try asking something that can be answered with yes or no."); await speakHost("That is not a yes or no question."); }
       } catch (error) {
         setFeedback("waiting"); setHost("I heard the question, but I could not check it.", error.message);
-        queueAutoListen();
       } finally {
-        isThinking = false; if (!roundWon) setState("", "Ready for your next yes-or-no question.");
+        isThinking = false; if (!roundWon) { micBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
       }
     }
     async function startRound() {
-      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true;
-      setHost("I have chosen someone famous.", "Ask one yes-or-no question at a time with the microphone."); await speakHost("I have chosen someone famous. Ask me yes or no questions to figure out who it is."); setState("", "Round live. Listening for your first yes-or-no question."); queueAutoListen(500);
+      hideWin(); roundWon = false; gameStarted = true; currentPerson = PEOPLE[Math.floor(Math.random() * PEOPLE.length)]; questions = []; renderQuestions(); heardText.textContent = "Nothing yet."; setFeedback("waiting"); againBtn.disabled = true; micBtn.disabled = false; lastHandledQuestion = ""; clearListenTimeout();
+      setHost("I have chosen someone famous.", "Click START MIC and ask one yes-or-no question at a time."); await speakHost("I have chosen someone famous. Click start mic and ask me yes or no questions to figure out who it is."); setState("", "Round live. Click START MIC for a 5 second listening window.");
     }
     async function listenForQuestion() {
       if (!recognition || !gameStarted || roundWon || isThinking || isSpeaking) return;
-      heardText.textContent = "Listening..."; heardResult = false;
+      heardText.textContent = "Listening..."; heardResult = false; micBtn.disabled = true;
       try { await pauseMonitoringForRecognition(); recognition.start(); }
-      catch (error) { heardText.textContent = "Nothing yet."; setFeedback("I couldn't hear that"); setHost("I couldn't start the microphone.", error.message); setState("error", error.message); await restoreMonitoring(); queueAutoListen(1200); }
+      catch (error) { heardText.textContent = "Nothing yet."; setFeedback("I couldn't hear that"); setHost("I couldn't start the microphone.", error.message); setState("error", error.message); micBtn.disabled = false; await restoreMonitoring(); }
     }
 
     startBtn.addEventListener("click", () => { startRound(); });
+    micBtn.addEventListener("click", () => { listenForQuestion(); });
     againBtn.addEventListener("click", () => { startRound(); });
     overlayAgain.addEventListener("click", () => { startRound(); });
 
-    if (!SpeechRecognition) { startBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
+    if (!SpeechRecognition) { startBtn.disabled = true; micBtn.disabled = true; againBtn.disabled = true; setHost("Your browser does not support speech recognition.", "Open this page in Chrome or Edge to play."); setState("error", "SpeechRecognition is unavailable in this browser."); }
     else { buildRecognition(); setState("", "Ready for a new round."); }
 
     watchPermission();
