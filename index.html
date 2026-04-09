@@ -31,7 +31,7 @@
     .q-item{border:1px solid var(--border);border-radius:18px;padding:13px;background:rgba(255,255,255,.84);display:grid;gap:8px}.q-item.yes{background:rgba(21,115,71,.08);border-color:rgba(21,115,71,.28)}.q-item.no{background:rgba(192,52,66,.08);border-color:rgba(192,52,66,.28)}.q-item.neutral{background:rgba(37,99,235,.06);border-color:rgba(37,99,235,.22)}
     .badge{justify-self:start;padding:5px 10px;border-radius:999px;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;background:#ece4d5;color:var(--muted)} .q-item.yes .badge{background:rgba(21,115,71,.16);color:var(--green)} .q-item.no .badge{background:rgba(192,52,66,.16);color:var(--red)} .q-item.neutral .badge{background:rgba(37,99,235,.12);color:var(--blue)}
     .q-text{margin:0;line-height:1.45}
-    .statusbar{display:grid;grid-template-columns:1fr 1fr 1.2fr 1fr 1fr;gap:12px;padding:14px 18px;border-top:1px solid var(--border);background:rgba(243,234,214,.86)}
+    .statusbar{display:grid;grid-template-columns:1fr 1fr 1.2fr 1fr 1fr;gap:12px;padding:14px 18px;border-top:1px solid var(--border);background:rgba(243,234,214,.94);position:sticky;bottom:0;z-index:12;backdrop-filter:blur(8px);box-shadow:0 -10px 24px rgba(76,55,18,.08)}
     .s-card{border:1px solid var(--border);border-radius:18px;padding:12px 14px;background:rgba(255,255,255,.75);min-width:0}.s-value{margin:0;line-height:1.4;word-break:break-word} #vu{width:100%;height:42px;display:block;border:1px solid var(--border);border-radius:10px;background:rgba(23,23,23,.08)}
     .win{position:fixed;inset:0;background:rgba(23,23,23,.45);display:none;align-items:center;justify-content:center;padding:20px}.win.show{display:flex}.win-card{width:min(540px,100%);background:linear-gradient(180deg,#fffaf0,#f1e6cf);border:2px solid var(--border);border-radius:28px;padding:28px;text-align:center;box-shadow:0 18px 50px rgba(76,55,18,.16)} .win-card h2{margin:0 0 12px;font-size:clamp(2.1rem,5vw,3.4rem);line-height:.95} .win-card p{margin:10px 0;color:var(--muted);line-height:1.5}
     @media (max-width:1100px){.main{grid-template-columns:1fr}.statusbar{grid-template-columns:1fr 1fr}}
@@ -108,9 +108,9 @@
         <p id="vuReadout" class="small">Level: 0%</p>
       </section>
       <section class="s-card">
-        <p class="label">Claude</p>
+        <p class="label">API Key</p>
         <p id="keyVal" class="s-value">Checking server...</p>
-        <p id="keyMeta" class="small">The game checks a local server endpoint for Claude access.</p>
+        <p id="keyMeta" class="small">The game checks the local server for Claude key registration.</p>
       </section>
     </footer>
   </div>
@@ -253,12 +253,12 @@
         if (!res.ok) throw new Error("Config endpoint unavailable");
         const data = await res.json();
         serverReady = Boolean(data.hasClaudeKey);
-        keyVal.textContent = serverReady ? "Configured" : "Missing";
+        keyVal.textContent = serverReady ? "Registered" : "Missing";
         keyMeta.textContent = serverReady ? "Claude is available through the local server." : "Start the app through the local server with `CLAUDE_KEY` set.";
       } catch (error) {
         serverReady = false;
         keyVal.textContent = "Server not running";
-        keyMeta.textContent = "Run `node server.js` so the browser can use `CLAUDE_KEY` through the backend.";
+        keyMeta.textContent = "Run `node server.js` so the browser can check whether `CLAUDE_KEY` is registered.";
       }
     }
     async function callClaude(question) {
@@ -283,7 +283,7 @@
         return;
       }
       if (!serverReady) {
-        setFeedback("I couldn't hear that");
+        setFeedback("waiting");
         setHost("Claude is not configured yet.", "Run `node server.js` from this folder with your `CLAUDE_KEY` environment variable set.");
         keyVal.textContent = "Missing";
         keyMeta.textContent = "The browser can only use the key through the local `/api/judge` backend.";
@@ -298,7 +298,7 @@
         if (feedbackText === "yes" || feedbackText === "no") { setHost(feedbackText, "Ask another yes-or-no question whenever you're ready."); await speakHost(feedbackText); queueAutoListen(); }
         else { setHost("that is not a yes or no question", "Try asking something that can be answered with yes or no."); await speakHost("That is not a yes or no question."); queueAutoListen(); }
       } catch (error) {
-        setFeedback("I couldn't hear that"); setHost("Something went wrong while checking that question.", error.message);
+        setFeedback("waiting"); setHost("I heard the question, but I could not check it.", error.message);
         queueAutoListen();
       } finally {
         isThinking = false; if (!roundWon) setState("", "Ready for your next yes-or-no question.");

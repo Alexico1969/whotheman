@@ -9,3 +9,6 @@ Original prompt: Let's start from scratch. Build me a web app that just listens 
 - Rebuilt `index.html` into the actual game UI: host panel on the left, scored question history on the right, and the mic/device/permission/VU info compressed into the bottom status bar.
 - Added the supplied famous-person roster, one-question-at-a-time microphone capture, strict feedback labels (`yes`, `no`, `I couldn't hear that`, `that is not a yes or no question`), and a win overlay with play-again flow.
 - Claude answer checking is wired for a runtime-injected key, but a standalone browser page still cannot read `CLAUDE_KEY` directly from the machine environment without some server-side or launch-time injection.
+- Changed the game to auto-listen continuously between host turns, added transcript cleanup for common mic mishears like `the man` -> `a man`, and moved Claude access to a local `server.js` backend that reads `process.env.CLAUDE_KEY`.
+- Updated the sticky bottom status bar so it stays visible while scrolling and shows explicit API-key registration state from the local server.
+- Fixed misleading error feedback so backend/judging failures no longer show `I couldn't hear that` when the transcript was actually captured.
