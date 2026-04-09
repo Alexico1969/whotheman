@@ -299,18 +299,55 @@
     font-style: normal;
   }
 
-  /* ---- TYPE INPUT ---- */
-  #type-row {
+  /* ---- INPUT AREA ---- */
+  #input-area {
     display: none;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 1.25rem;
+  }
+
+  /* Push-to-talk button */
+  #btn-ptt {
+    width: 100%;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 20px;
+    border-radius: 12px;
+    border: 2px solid var(--yellow);
+    background: rgba(255,225,53,0.08);
+    color: var(--yellow);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s;
+    letter-spacing: 1px;
+  }
+  #btn-ptt:hover { background: rgba(255,225,53,0.14); }
+  #btn-ptt.recording {
+    background: var(--red);
+    border-color: var(--red);
+    color: #fff;
+    animation: pulse-rec 0.8s infinite;
+  }
+  #btn-ptt:disabled { opacity: 0.35; cursor: default; }
+
+  @keyframes pulse-rec {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,61,87,0.4); }
+    50%      { box-shadow: 0 0 0 10px rgba(255,61,87,0); }
+  }
+
+  /* Type fallback row */
+  #type-row {
+    display: flex;
     gap: 8px;
-    margin-bottom: 1rem;
   }
 
   #type-input {
     flex: 1;
     font-family: 'DM Sans', sans-serif;
-    font-size: 15px;
-    padding: 11px 16px;
+    font-size: 14px;
+    padding: 10px 14px;
     background: var(--gray);
     border: 1px solid #444;
     border-radius: 8px;
@@ -326,7 +363,7 @@
     font-family: 'DM Sans', sans-serif;
     font-size: 14px;
     font-weight: 600;
-    padding: 11px 20px;
+    padding: 10px 18px;
     background: var(--yellow);
     color: var(--black);
     border: none;
@@ -334,10 +371,7 @@
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: background 0.15s;
   }
-
-  #btn-ask:hover { background: #f5d800; }
   #btn-ask:disabled { opacity: 0.4; cursor: default; }
 
   /* ---- CONTROLS ---- */
@@ -677,10 +711,13 @@
     <button class="btn btn-danger" id="btn-reveal" onclick="revealPerson()" style="display:none">Give up / reveal</button>
   </div>
 
-  <!-- Type a question fallback -->
-  <div id="type-row">
-    <input type="text" id="type-input" placeholder="Type your yes/no question here..." autocomplete="off" />
-    <button id="btn-ask" onclick="submitTyped()">Ask</button>
+  <!-- Input area: push-to-talk + type fallback -->
+  <div id="input-area">
+    <button id="btn-ptt">🎙 HOLD TO SPEAK</button>
+    <div id="type-row">
+      <input type="text" id="type-input" placeholder="Or type your question here..." autocomplete="off" />
+      <button id="btn-ask" onclick="submitTyped()">Ask</button>
+    </div>
   </div>
 
   <!-- Status bar -->
@@ -773,15 +810,12 @@ const FAMOUS_PEOPLE = [
    ============================================ */
 let currentPerson = null;
 let questionHistory = [];
-let recognition = null;
 let isSpeaking = false;
 let gameActive = false;
 let waitingForQ = false;
-let isListening = false;
 
 let apiKey = localStorage.getItem('wtm_api_key') || '';
 
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const synth = window.speechSynthesis;
 
 /* ============================================
@@ -806,98 +840,179 @@ function initKeyUI() {
 }
 
 /* ============================================
-   SPEECH RECOGNITION
+   PUSH-TO-TALK via MediaRecorder
    ============================================ */
-function killRecognition() {
-  if (recognition) {
-    recognition.onstart       = null;
-    recognition.onresult      = null;
-    recognition.onend         = null;
-    recognition.onerror       = null;
-    recognition.onspeechstart = null;
-    recognition.onspeechend   = null;
-    recognition.onnomatch     = null;
-    try { recognition.abort(); } catch(e) {}
-    recognition = null;
+let mediaStream    = null;
+let mediaRecorder  = null;
+let audioChunks    = [];
+
+async function initMic() {
+  if (mediaStream) return true; // already have permission
+  try {
+    dlog('Requesting mic via getUserMedia...', 'mic');
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    dlog('Mic permission granted', 'mic');
+    return true;
+  } catch(e) {
+    dlog(`Mic permission denied: ${e.message}`, 'err');
+    setHost('⛔ Microphone access denied. Click the 🔒 in the address bar, allow the mic, then refresh.', '');
+    setStatus('', '⛔ Mic blocked');
+    return false;
   }
-  isListening = false;
-  dlog('killRecognition() — mic released', 'info');
 }
 
-function setupRecognition() {
-  if (!SpeechRecognition) {
-    dlog('SpeechRecognition NOT supported!', 'err');
-    setHost("Your browser doesn't support speech recognition. Please use Chrome.", "");
+function startRecording() {
+  if (!gameActive || !waitingForQ || mediaRecorder) return;
+  if (!mediaStream) { dlog('No stream — call initMic first', 'err'); return; }
+
+  audioChunks = [];
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus' : 'audio/webm';
+  dlog(`Starting MediaRecorder (${mimeType})`, 'mic');
+
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = onRecordingStop;
+  mediaRecorder.start();
+
+  const btn = document.getElementById('btn-ptt');
+  btn.classList.add('recording');
+  btn.textContent = '🔴 RECORDING — RELEASE TO SEND';
+  setMic('listening');
+  setStatus('listening', 'Recording — speak now!');
+  dlog('Recording started', 'mic');
+}
+
+function stopRecording() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+  dlog('Recording stopped — processing...', 'mic');
+  mediaRecorder.stop();
+  mediaRecorder = null;
+
+  const btn = document.getElementById('btn-ptt');
+  btn.classList.remove('recording');
+  btn.textContent = '⏳ Processing...';
+  btn.disabled = true;
+  setMic('idle');
+  setStatus('thinking', 'Processing audio...');
+}
+
+async function onRecordingStop() {
+  if (audioChunks.length === 0) {
+    dlog('No audio captured', 'err');
+    resetPTT();
     return;
   }
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  dlog(`Audio blob: ${(blob.size/1024).toFixed(1)} KB`, 'mic');
 
-  recognition = new SpeechRecognition();
-  recognition.continuous     = true;   // stays open — no rapid restart cycles
-  recognition.lang           = 'en-US';
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
+  // Convert to base64
+  const base64 = await blobToBase64(blob);
+  dlog('Sending audio to Claude for transcription + answer...', 'api');
 
-  recognition.onstart = function() {
-    isListening = true;
-    dlog('mic OPEN (continuous)', 'mic');
-    setMic('listening');
-    setStatus('listening', 'Listening — ask your question!');
-  };
+  if (!waitingForQ || !gameActive) { resetPTT(); return; }
+  waitingForQ = false;
 
-  recognition.onresult = function(e) {
-    // With continuous=true, results accumulate — always read the latest final one
-    const result = e.results[e.results.length - 1];
-    if (!result.isFinal) return;
-    const transcript = result[0].transcript.trim();
-    const conf = (result[0].confidence * 100).toFixed(0);
-    dlog(`HEARD: "${transcript}" (${conf}% confidence)`, 'heard');
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-5',
+        max_tokens: 120,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `You are a hype game show host. The secret mystery person is "${currentPerson}".
+A student just spoke a yes/no question or a guess into this audio recording.
+First, transcribe what they said (write it after "HEARD:").
+Then, if it is a GUESS (e.g. "Is it X?" or "Is the person X?"): determine if they correctly guessed ${currentPerson}. If correct start your answer with CORRECT. If wrong start with NO.
+If it is a YES/NO question: answer YES or NO (whichever is accurate).
+After YES/NO/CORRECT/NO, add ONE short energetic sentence (max 15 words). Never reveal the person's name in a wrong guess.
+Format your reply EXACTLY as:
+HEARD: [what they said]
+ANSWER: [YES/NO/CORRECT/NO + hype sentence]`
+            },
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'audio/webm', data: base64 }
+            }
+          ]
+        }]
+      })
+    });
 
-    if (!waitingForQ || !gameActive || isSpeaking) {
-      dlog(`ignored — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'info');
+    if (!res.ok) {
+      const err = await res.json();
+      dlog(`API error ${res.status}: ${err.error?.message}`, 'err');
+
+      // Claude may not support audio — fall back to asking user to type
+      dlog('Audio not supported by API — showing type fallback', 'info');
+      setHost("Couldn't process audio. Please type your question below.", '');
+      waitingForQ = true;
+      resetPTT();
       return;
     }
-    waitingForQ = false;
+
+    const data = await res.json();
+    const raw = data.content?.[0]?.text?.trim() || '';
+    dlog(`Claude raw: ${raw}`, 'api');
+
+    // Parse HEARD and ANSWER lines
+    const heardMatch  = raw.match(/HEARD:\s*(.+)/i);
+    const answerMatch = raw.match(/ANSWER:\s*(.+)/i);
+    const transcript  = heardMatch  ? heardMatch[1].trim()  : '(unclear)';
+    const reply       = answerMatch ? answerMatch[1].trim()  : raw;
+
+    dlog(`Transcript: "${transcript}"`, 'heard');
     showHeard(transcript);
-    handleQuestion(transcript);
-  };
 
-  recognition.onspeechstart = function() { dlog('speech detected...', 'mic'); };
-  recognition.onspeechend   = function() { dlog('speech ended', 'mic'); };
-  recognition.onnomatch     = function() { dlog('no match', 'err'); };
+    const upper = reply.toUpperCase();
+    const isCorrect = upper.startsWith('CORRECT');
+    const answerYes = upper.startsWith('YES');
 
-  recognition.onend = function() {
-    isListening = false;
-    dlog(`onend — gameActive=${gameActive} waitingForQ=${waitingForQ}`, 'mic');
-    setMic('idle');
-    // Restart automatically if game is still running
-    if (gameActive) {
-      setTimeout(() => {
-        if (gameActive && recognition && !isListening) {
-          dlog('auto-restarting continuous recognition', 'mic');
-          try { recognition.start(); } catch(e) { dlog('restart threw: ' + e.message, 'err'); }
-        }
-      }, 300);
-    }
-  };
+    setHost(reply, '');
+    if (isCorrect) { handleWin(); return; }
 
-  recognition.onerror = function(e) {
-    dlog(`ERROR: ${e.error}`, 'err');
-    // Fatal errors — stop the loop
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      gameActive = false;
-      setMic('idle');
-      setStatus('', '⛔ Mic blocked — click the 🔒 in the address bar, allow mic, refresh.');
-      setHost('⛔ Microphone access is blocked. Click the padlock icon in the address bar, allow mic, then refresh.', '');
-    } else if (e.error === 'audio-capture') {
-      gameActive = false;
-      setMic('idle');
-      setStatus('', '⛔ No microphone found — plug one in and refresh.');
-      setHost('⛔ No microphone detected. Please connect a microphone and refresh.', '');
-    } else if (e.error === 'network') {
-      setStatus('', '⚠️ Network error — speech needs internet.');
-    }
-    // onend fires after onerror and handles restart
-  };
+    questionHistory.push({ q: transcript, a: answerYes ? 'YES' : 'NO', cls: answerYes ? 'yes' : 'no' });
+    updateQList();
+    speak(reply, () => {
+      waitingForQ = true;
+      resetPTT();
+    });
+
+  } catch(e) {
+    dlog(`Fetch error: ${e.message}`, 'err');
+    setHost('Network error — check your connection.', '');
+    waitingForQ = true;
+    resetPTT();
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function resetPTT() {
+  const btn = document.getElementById('btn-ptt');
+  if (!btn) return;
+  btn.disabled = false;
+  btn.classList.remove('recording');
+  btn.textContent = '🎙 HOLD TO SPEAK';
+  setMic('idle');
+  if (waitingForQ && gameActive) setStatus('listening', 'Ready — hold the button to ask!');
 }
 
 function listenForQuestion() {
@@ -905,41 +1020,33 @@ function listenForQuestion() {
     dlog(`listenForQuestion skipped — gameActive=${gameActive} waitingForQ=${waitingForQ} isSpeaking=${isSpeaking}`, 'info');
     return;
   }
-  showTypeRow(true);
-  setHost("Go ahead, ask a yes/no question...", "");
-
-  if (isListening) {
-    // Already open — just update the UI, onresult will pick up the next utterance
-    dlog('mic already open — ready for next question', 'info');
-    setMic('listening');
-    setStatus('listening', 'Listening — ask your question!');
-    return;
-  }
-
-  // First time this round — create the recognition object and start it once
-  if (!recognition) setupRecognition();
-  dlog('listenForQuestion — starting mic', 'fn');
-  try {
-    recognition.start();
-  } catch(e) {
-    dlog(`recognition.start() threw: ${e.message}`, 'err');
-  }
+  dlog('listenForQuestion — showing input area', 'fn');
+  document.getElementById('input-area').style.display = 'flex';
+  resetPTT();
+  document.getElementById('type-input').value = '';
+  document.getElementById('btn-ask').disabled = false;
+  setHost('Hold the button and ask your yes/no question!', '');
+  setStatus('listening', 'Ready — hold the button to ask!');
 }
 
-function showTypeRow(show) {
-  const row = document.getElementById('type-row');
-  const inp = document.getElementById('type-input');
-  row.style.display = show ? 'flex' : 'none';
-  if (show) { inp.value = ''; inp.disabled = false; document.getElementById('btn-ask').disabled = false; }
+function killRecognition() {
+  // Stop any in-progress recording
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try { mediaRecorder.stop(); } catch(e) {}
+    mediaRecorder = null;
+  }
+  audioChunks = [];
+  isListening = false;
+  dlog('killRecognition() — recorder stopped', 'info');
 }
 
 function submitTyped() {
   const inp = document.getElementById('type-input');
   const q = inp.value.trim();
   if (!q || !gameActive || !waitingForQ) return;
+  dlog(`Typed: "${q}"`, 'heard');
   inp.disabled = true;
   document.getElementById('btn-ask').disabled = true;
-  killRecognition();
   showHeard(q);
   handleQuestion(q);
 }
@@ -1038,15 +1145,14 @@ function newRound() {
   synth.cancel();
   waitingForQ = false;
   gameActive = false;
-  killRecognition();    // tear down old object; fresh one created in listenForQuestion
-  setupRecognition();   // create now so mic permission prompt happens before TTS ends
+  killRecognition();
 
   currentPerson = FAMOUS_PEOPLE[Math.floor(Math.random() * FAMOUS_PEOPLE.length)];
   dlog(`Mystery person: ${currentPerson}`, 'api');
   questionHistory = [];
   updateQList();
   hideHeard();
-  showTypeRow(false);
+  document.getElementById('input-area').style.display = 'none';
 
   document.getElementById('win-screen').style.display = 'none';
   document.getElementById('q-log').style.display = 'none';
@@ -1055,6 +1161,9 @@ function newRound() {
   setStatus('', 'New round starting...');
 
   setHost("Alright, I've got someone in mind...", "");
+
+  // Request mic permission during TTS so it's ready when speech ends
+  initMic();
 
   speak("ALRIGHT! I've got a mystery person locked in! Your job? Ask me YES or NO questions to figure out who it is. Go ahead — fire away!", () => {
     gameActive = true;
@@ -1150,7 +1259,8 @@ function handleWin() {
   gameActive = false;
   waitingForQ = false;
   synth.cancel();
-  showTypeRow(false);
+  killRecognition();
+  document.getElementById('input-area').style.display = 'none';
 
   const winLines = [
     `YESSS! You got it! The mystery person was ${currentPerson}!`,
@@ -1181,7 +1291,7 @@ function revealPerson() {
   killRecognition();
   synth.cancel();
   hideHeard();
-  showTypeRow(false);
+  document.getElementById('input-area').style.display = 'none';
 
   const msg = `No worries! The mystery person was... ${currentPerson}! Better luck next round!`;
   setHost(msg, "");
@@ -1239,8 +1349,21 @@ function escapeHtml(str) {
    INIT
    ============================================ */
 initKeyUI();
-dlog(`Page loaded — SpeechRecognition: ${SpeechRecognition ? 'supported' : 'NOT SUPPORTED'}`, 'info');
+dlog(`Page loaded — MediaRecorder: ${typeof MediaRecorder !== 'undefined' ? 'supported' : 'NOT SUPPORTED'}`, 'info');
 dlog(`API key: ${apiKey ? 'present' : 'MISSING'}`, 'info');
+
+// Wire push-to-talk button (mouse + touch)
+const pttBtn = document.getElementById('btn-ptt');
+pttBtn.addEventListener('mousedown',  e => { e.preventDefault(); startRecording(); });
+pttBtn.addEventListener('mouseup',    e => { e.preventDefault(); stopRecording(); });
+pttBtn.addEventListener('mouseleave', e => { if (mediaRecorder) stopRecording(); });
+pttBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); }, { passive: false });
+pttBtn.addEventListener('touchend',   e => { e.preventDefault(); stopRecording(); },  { passive: false });
+
+// Enter key on type input
+document.getElementById('type-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitTyped();
+});
 
 document.getElementById('type-input').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') submitTyped();
