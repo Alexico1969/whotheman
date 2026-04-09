@@ -143,6 +143,7 @@
     const FEMALE_NAMES = new Set(["Oprah Winfrey","Marilyn Monroe","Rosa Parks","Amelia Earhart","Eleanor Roosevelt","Madonna","Hillary Clinton","Katharine Hepburn","Billie Holiday","Serena Williams","Meryl Streep","Joan of Arc","Catherine the Great","Ada Lovelace","Cleopatra","Taylor Swift","Zendaya","Billie Eilish","Selena Gomez","Ariana Grande","Kim Kardashian","Beyoncé","Rihanna","Lana Del Rey","Dua Lipa","Adele"]);
     let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], listenTimeoutId = null, finalizeTimeoutId = null, serverReady = false, lastHandledQuestion = "", latestTranscript = "";
     const lifeStatusCache = new Map();
+    const personProfileCache = new Map();
 
     function setState(mode, detail) {
       orb.className = "orb"; fdot.className = "fdot";
@@ -200,34 +201,67 @@
       if (/^(is it|is this|is the person|is he|is she).*(a woman|female)$/.test(q)) return { feedback: isFemale ? "yes" : "no", guessedCorrectly: false };
       return null;
     }
-    function isAliveQuestion(question) {
+    function getOccupationIntent(question) {
       const q = normalizeName(question);
-      return /^(is|was)\s+(he|she|it|this person|the person)\s+(still\s+)?(alive|living)\b/.test(q);
+      if (!/^(is|was)\s+(he|she|it|this person|the person)\s+/.test(q)) return null;
+      if (/\b(a|an)\s+singer\b/.test(q)) return "singer";
+      if (/\b(a|an)\s+actress\b/.test(q)) return "actress";
+      if (/\b(a|an)\s+actor\b/.test(q)) return "actor";
+      if (/\b(a|an)\s+musician\b/.test(q)) return "musician";
+      if (/\b(a|an)\s+rapper\b/.test(q)) return "rapper";
+      if (/\b(a|an)\s+athlete\b/.test(q)) return "athlete";
+      if (/\b(a|an)\s+politician\b/.test(q)) return "politician";
+      if (/\b(a|the)\s+president\b/.test(q)) return "president";
+      return null;
     }
-    async function fetchWikipediaRecord(name) {
-      const titleRes = await fetch("https://en.wikipedia.org/w/api.php?origin=*&action=query&prop=pageprops&redirects=1&titles=" + encodeURIComponent(name) + "&format=json");
-      if (!titleRes.ok) throw new Error("Wikipedia lookup failed.");
-      const titleData = await titleRes.json();
-      const pages = Object.values(titleData.query?.pages || {});
+    function getLifeQuestionIntent(question) {
+      const q = normalizeName(question);
+      if (/^(is|was)\s+(he|she|it|this person|the person)\s+(still\s+)?(alive|living)\b/.test(q)) return "alive";
+      if (/^(is|was)\s+(he|she|it|this person|the person)\s+dead\b/.test(q)) return "dead";
+      if (/^(has|had)\s+(he|she|it|this person|the person)\s+died\b/.test(q)) return "dead";
+      return null;
+    }
+    async function fetchPersonProfile(name) {
+      if (personProfileCache.has(name)) return personProfileCache.get(name);
+
+      const res = await fetch("https://en.wikipedia.org/w/api.php?origin=*&action=query&prop=categories|extracts&cllimit=max&redirects=1&titles=" + encodeURIComponent(name) + "&format=json&exintro=1&explaintext=1");
+      if (!res.ok) throw new Error("Wikipedia lookup failed.");
+      const data = await res.json();
+      const pages = Object.values(data.query?.pages || {});
       const page = pages.find((item) => !item.missing);
-      const wikidataId = page?.pageprops?.wikibase_item;
-      if (!wikidataId) throw new Error("Wikipedia did not expose a Wikidata record for this person.");
-      return wikidataId;
+      if (!page) throw new Error("Wikipedia could not find a page for this person.");
+
+      const profile = {
+        extract: normalizeName(page.extract || ""),
+        categories: (page.categories || []).map((item) => normalizeName(item.title.replace(/^Category:/i, "")))
+      };
+      personProfileCache.set(name, profile);
+      return profile;
     }
     async function fetchLifeStatus(name) {
       if (lifeStatusCache.has(name)) return lifeStatusCache.get(name);
 
-      const wikidataId = await fetchWikipediaRecord(name);
-      const entityRes = await fetch("https://www.wikidata.org/w/api.php?origin=*&action=wbgetentities&ids=" + encodeURIComponent(wikidataId) + "&format=json&props=claims");
-      if (!entityRes.ok) throw new Error("Wikidata lookup failed.");
-      const entityData = await entityRes.json();
-      const entity = entityData.entities?.[wikidataId];
-      if (!entity) throw new Error("Wikidata did not return a person record.");
+      const profile = await fetchPersonProfile(name);
+      const categories = profile.categories;
+      const isLiving = categories.includes("living people");
+      const hasDeathCategory = categories.some((title) => /^\d{4} deaths$/.test(title));
+      if (!isLiving && !hasDeathCategory) throw new Error("Wikipedia did not clearly say whether this person is alive.");
 
-      const hasDeathDate = Boolean(entity.claims?.P570?.length);
-      const result = hasDeathDate ? "no" : "yes";
+      const result = isLiving ? "alive" : "dead";
       lifeStatusCache.set(name, result);
       return result;
+    }
+    function profileMatchesOccupation(profile, intent) {
+      const haystack = [profile.extract, ...profile.categories].join(" ");
+      if (intent === "singer") return /\bsinger\b|\bvocalist\b|\bsinging\b/.test(haystack);
+      if (intent === "actress") return /\bactress\b/.test(haystack);
+      if (intent === "actor") return /\bactor\b|\bactress\b/.test(haystack);
+      if (intent === "musician") return /\bmusician\b|\bcomposer\b|\bsinger\b|\bvocalist\b|\brapper\b/.test(haystack);
+      if (intent === "rapper") return /\brapper\b|\bhip hop\b/.test(haystack);
+      if (intent === "athlete") return /\bathlete\b|\bfootball player\b|\bbasketball player\b|\btennis player\b|\bsoccer player\b|\bbaseball player\b|\bgolfer\b|\bracing driver\b/.test(haystack);
+      if (intent === "politician") return /\bpolitician\b|\bstatesman\b|\bpresident\b|\bprime minister\b|\bsenator\b/.test(haystack);
+      if (intent === "president") return /\bpresident\b/.test(haystack);
+      return false;
     }
     function clearListenTimeout() {
       if (listenTimeoutId) {
@@ -364,7 +398,8 @@
       if (!question) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Try again with a short yes-or-no question."); return; }
       const localGuess = detectLocalGuess(question);
       const localJudged = judgeLocally(question);
-      const aliveQuestion = isAliveQuestion(question);
+      const occupationIntent = getOccupationIntent(question);
+      const lifeQuestionIntent = getLifeQuestionIntent(question);
       if (!isYesNoQuestion(question) && !localGuess) {
         setFeedback("that is not a yes or no question");
         addQuestion(question, "that is not a yes or no question");
@@ -379,18 +414,38 @@
         await speakHost(localJudged.feedback);
         return;
       }
-      if (aliveQuestion) {
-        isThinking = true; micBtn.disabled = true; setState("thinking", "Checking whether this person is still alive via Wikipedia.");
+      if (occupationIntent) {
+        isThinking = true; micBtn.disabled = true; setState("thinking", "Checking this fact on Wikipedia.");
         try {
-          const lifeAnswer = await fetchLifeStatus(currentPerson);
-          setFeedback(lifeAnswer, lifeAnswer === "yes" ? "yes" : "no");
-          addQuestion(question, lifeAnswer);
-          setHost(lifeAnswer, "This answer was checked from the person's Wikipedia-linked Wikidata record.");
-          await speakHost(lifeAnswer);
+          const profile = await fetchPersonProfile(currentPerson);
+          const feedbackText = profileMatchesOccupation(profile, occupationIntent) ? "yes" : "no";
+          setFeedback(feedbackText, feedbackText);
+          addQuestion(question, feedbackText);
+          setHost(feedbackText, "This answer was checked from the person's Wikipedia summary and categories.");
+          await speakHost(feedbackText);
           return;
         } catch (error) {
           setFeedback("waiting");
-          setHost("I heard the question, but I could not check whether they are still alive.", error.message);
+          setHost("I heard the question, but I could not check that fact on Wikipedia.", error.message);
+          return;
+        } finally {
+          isThinking = false;
+          if (!roundWon) { micBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+        }
+      }
+      if (lifeQuestionIntent) {
+        isThinking = true; micBtn.disabled = true; setState("thinking", "Checking whether this person is still alive via Wikipedia.");
+        try {
+          const lifeStatus = await fetchLifeStatus(currentPerson);
+          const feedbackText = lifeQuestionIntent === "alive" ? (lifeStatus === "alive" ? "yes" : "no") : (lifeStatus === "dead" ? "yes" : "no");
+          setFeedback(feedbackText, feedbackText === "yes" ? "yes" : "no");
+          addQuestion(question, feedbackText);
+          setHost(feedbackText, "This answer was checked from the person's Wikipedia categories.");
+          await speakHost(feedbackText);
+          return;
+        } catch (error) {
+          setFeedback("waiting");
+          setHost("I heard the question, but I could not check their life status on Wikipedia.", error.message);
           return;
         } finally {
           isThinking = false;
