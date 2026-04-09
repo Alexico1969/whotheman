@@ -983,6 +983,7 @@ async function onRecordingStop() {
   if (transcript) {
     waitingForQ = false;
     showHeard(transcript);
+    setHost(`I heard: <em>"${escapeHtml(transcript)}"</em> — let me think…`, '');
     handleQuestion(transcript);
   } else {
     dlog('Whisper returned empty — type fallback', 'info');
