@@ -640,6 +640,7 @@ let recognition = null;
 let isSpeaking = false;
 let gameActive = false;
 let waitingForQ = false;
+let isListening = false;
 let apiKey = localStorage.getItem('wtm_api_key') || '';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -680,13 +681,19 @@ function setupRecognition() {
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
 
+  recognition.onstart = function() {
+    isListening = true;
+  };
+
   recognition.onresult = function(e) {
+    isListening = false;
     const transcript = e.results[0][0].transcript.trim();
     showHeard(transcript);
     handleQuestion(transcript);
   };
 
   recognition.onend = function() {
+    isListening = false;
     setMic('idle');
     if (waitingForQ && gameActive && !isSpeaking) {
       setTimeout(() => listenForQuestion(), 700);
@@ -694,11 +701,13 @@ function setupRecognition() {
   };
 
   recognition.onerror = function(e) {
+    isListening = false;
     setMic('idle');
-    console.error('SpeechRecognition error:', e.error, e.message);
+    if (e.error === 'aborted') return; // we called abort() intentionally — ignore
+    console.error('SpeechRecognition error:', e.error);
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      setStatus('', '⛔ Microphone blocked — click the 🔒 icon in the address bar and allow mic access, then refresh.');
-      setHost('⛔ Microphone access is blocked. Click the padlock/camera icon in the address bar, allow the microphone, then refresh the page.', '');
+      setStatus('', '⛔ Microphone blocked — click the 🔒 in the address bar, allow mic, then refresh.');
+      setHost('⛔ Microphone access is blocked. Click the padlock icon in the address bar, allow the microphone, then refresh.', '');
       waitingForQ = false;
       return;
     }
@@ -709,11 +718,8 @@ function setupRecognition() {
       return;
     }
     if (e.error === 'network') {
-      setStatus('', '⚠️ Speech needs internet — check connection.');
-      setHost('⚠️ Speech recognition needs internet access to Google\'s servers. Check your connection.', '');
-    }
-    if (e.error === 'no-speech') {
-      // normal — just restart
+      setStatus('', '⚠️ Speech needs internet — check your connection.');
+      setHost('⚠️ Speech recognition needs internet access. Check your connection.', '');
     }
     if (waitingForQ && gameActive) {
       setTimeout(() => listenForQuestion(), 1000);
@@ -723,14 +729,15 @@ function setupRecognition() {
 
 function listenForQuestion() {
   if (!gameActive || !waitingForQ || isSpeaking) return;
+  if (isListening) return; // already running — don't double-start
   showTypeRow(true);
   if (!recognition) setupRecognition();
   setMic('listening');
-  setStatus('listening', 'Listening — ask your question, or type it below!');
+  setStatus('listening', 'Listening — ask your question!');
   setHost("Go ahead, ask a yes/no question...", "");
   try { recognition.start(); } catch(e) {
+    isListening = false;
     console.error('recognition.start() failed:', e);
-    setStatus('', '⛔ Could not start mic: ' + e.message);
   }
 }
 
