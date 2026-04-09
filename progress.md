@@ -12,3 +12,5 @@ Original prompt: Let's start from scratch. Build me a web app that just listens 
 - Changed the game to auto-listen continuously between host turns, added transcript cleanup for common mic mishears like `the man` -> `a man`, and moved Claude access to a local `server.js` backend that reads `process.env.CLAUDE_KEY`.
 - Updated the sticky bottom status bar so it stays visible while scrolling and shows explicit API-key registration state from the local server.
 - Fixed misleading error feedback so backend/judging failures no longer show `I couldn't hear that` when the transcript was actually captured.
+- Switched the footer from page-flow sticky behavior to a fixed viewport status bar so it remains visible while scrolling.
+- Added local handling for simple gender questions like `Is it a man?` and `Is it a woman?` so the exact heard question is processed directly instead of depending on Claude for that basic case.
