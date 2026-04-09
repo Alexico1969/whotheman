@@ -11,3 +11,8 @@
   from = "/api/judge"
   to = "/.netlify/functions/judge"
   status = 200
+
+[[redirects]]
+  from = "/api/unlock"
+  to = "/.netlify/functions/unlock"
+  status = 200
