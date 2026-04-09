@@ -110,9 +110,8 @@
     font-weight: 700;
   }
 
-  #debug-clear {
+  #debug-header .dbtn {
     font-size: 10px;
-    color: #555;
     background: none;
     border: 1px solid #333;
     border-radius: 4px;
@@ -120,7 +119,10 @@
     cursor: pointer;
     color: #888;
   }
-  #debug-clear:hover { color: #fff; border-color: #555; }
+  #debug-header .dbtn:hover { color: #fff; border-color: #555; }
+  #debug-header .dbtn.paused { color: #FF3D57; border-color: #FF3D57; }
+  #debug-header .dbtn.copied { color: #00E676; border-color: #00E676; }
+  #debug-btns { display: flex; gap: 5px; }
 
   #debug-log {
     flex: 1;
@@ -704,7 +706,11 @@
 <div id="debug-panel">
   <div id="debug-header">
     <span>🔬 Debug Log</span>
-    <button id="debug-clear" onclick="clearDebug()">Clear</button>
+    <div id="debug-btns">
+      <button class="dbtn" id="btn-pause-log" onclick="togglePauseLog()">Pause</button>
+      <button class="dbtn" id="btn-copy-log"  onclick="copyLog()">Copy</button>
+      <button class="dbtn" onclick="clearDebug()">Clear</button>
+    </div>
   </div>
   <div id="debug-log"></div>
 </div>
@@ -715,7 +721,10 @@
 /* ============================================
    DEBUG LOG
    ============================================ */
+let logPaused = false;
+
 function dlog(msg, type='info') {
+  if (logPaused) return;
   const log = document.getElementById('debug-log');
   const el = document.createElement('div');
   el.className = 'dlog dlog-' + type;
@@ -724,6 +733,25 @@ function dlog(msg, type='info') {
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
 }
+
+function togglePauseLog() {
+  logPaused = !logPaused;
+  const btn = document.getElementById('btn-pause-log');
+  btn.textContent = logPaused ? 'Resume' : 'Pause';
+  btn.classList.toggle('paused', logPaused);
+}
+
+function copyLog() {
+  const entries = document.querySelectorAll('#debug-log .dlog');
+  const text = Array.from(entries).map(el => el.textContent).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btn-copy-log');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
 function clearDebug() { document.getElementById('debug-log').innerHTML = ''; }
 
 /* ============================================
@@ -749,6 +777,7 @@ let recognition = null;
 let isSpeaking = false;
 let gameActive = false;
 let waitingForQ = false;
+let isListening = false;
 
 let apiKey = localStorage.getItem('wtm_api_key') || '';
 
@@ -792,7 +821,8 @@ function killRecognition() {
     try { recognition.abort(); } catch(e) {}
     recognition = null;
   }
-    dlog('killRecognition() — old object discarded', 'info');
+  isListening = false;
+  dlog('killRecognition() — old object discarded', 'info');
 }
 
 function setupRecognition() {
@@ -813,7 +843,8 @@ function setupRecognition() {
   };
 
   recognition.onresult = function(e) {
-        const transcript = e.results[0][0].transcript.trim();
+    isListening = false;
+    const transcript = e.results[0][0].transcript.trim();
     const conf = (e.results[0][0].confidence * 100).toFixed(0);
     dlog(`HEARD: "${transcript}" (${conf}% confidence)`, 'heard');
     showHeard(transcript);
@@ -825,7 +856,8 @@ function setupRecognition() {
   recognition.onnomatch     = function() { dlog('no match found for speech', 'err'); };
 
   recognition.onend = function() {
-        dlog(`recognition.onend — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'mic');
+    isListening = false; // always resets here — onend is guaranteed to fire
+    dlog(`recognition.onend — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'mic');
     setMic('idle');
     if (waitingForQ && gameActive && !isSpeaking) {
       setTimeout(() => listenForQuestion(), 500);
@@ -833,28 +865,23 @@ function setupRecognition() {
   };
 
   recognition.onerror = function(e) {
-        setMic('idle');
+    // DO NOT restart here — onend always fires after onerror, it will restart
     dlog(`ERROR: ${e.error}`, 'err');
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      setMic('idle');
       setStatus('', '⛔ Microphone blocked — click the 🔒 in the address bar, allow mic, then refresh.');
       setHost('⛔ Microphone access is blocked. Click the padlock icon in the address bar, allow the microphone, then refresh.', '');
       waitingForQ = false;
-      return;
-    }
-    if (e.error === 'audio-capture') {
+    } else if (e.error === 'audio-capture') {
+      setMic('idle');
       setStatus('', '⛔ No microphone found — plug one in and refresh.');
       setHost('⛔ No microphone detected. Please connect a microphone and refresh.', '');
       waitingForQ = false;
-      return;
-    }
-    if (e.error === 'network') {
+    } else if (e.error === 'network') {
       setStatus('', '⚠️ Speech needs internet — check your connection.');
       setHost('⚠️ Speech recognition needs internet access. Check your connection.', '');
     }
-    // For no-speech or other errors, restart
-    if (waitingForQ && gameActive) {
-      setTimeout(() => listenForQuestion(), 500);
-    }
+    // onend will fire next and handle the restart
   };
 }
 
@@ -863,14 +890,21 @@ function listenForQuestion() {
     dlog(`listenForQuestion skipped — gameActive=${gameActive} waitingForQ=${waitingForQ} isSpeaking=${isSpeaking}`, 'info');
     return;
   }
+  if (isListening) {
+    dlog('listenForQuestion skipped — already listening', 'info');
+    return;
+  }
   dlog('listenForQuestion — creating fresh recognition & starting', 'fn');
+  killRecognition();   // discard any lingering object; sets isListening=false
+  setupRecognition();  // fresh object with clean handlers
+  isListening = true;  // set AFTER kill, BEFORE start
   showTypeRow(true);
-  setupRecognition(); // always fresh object
   setMic('listening');
   setStatus('listening', 'Listening — ask your question!');
   setHost("Go ahead, ask a yes/no question...", "");
   try { recognition.start(); } catch(e) {
-        dlog(`recognition.start() threw: ${e.message}`, 'err');
+    isListening = false;
+    dlog(`recognition.start() threw: ${e.message}`, 'err');
   }
 }
 
