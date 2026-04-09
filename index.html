@@ -754,7 +754,10 @@
 
 </div><!-- /#layout -->
 
-<script>
+<script type="module">
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+env.allowLocalModels = false;
+
 /* ============================================
    DEBUG LOG
    ============================================ */
@@ -806,6 +809,67 @@ const FAMOUS_PEOPLE = [
 ];
 
 /* ============================================
+   WHISPER (local STT)
+   ============================================ */
+let whisper = null;
+let whisperReady = false;
+
+async function initWhisper() {
+  dlog('Loading Whisper model — first run downloads ~150 MB, cached after that…', 'api');
+  setStatus('thinking', 'Loading speech model…');
+  const startBtn = document.getElementById('btn-start');
+  if (startBtn) startBtn.disabled = true;
+  try {
+    whisper = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+      progress_callback: p => {
+        if (p.status === 'downloading' && p.total) {
+          const pct = Math.round(p.loaded / p.total * 100);
+          setStatus('thinking', `Downloading model: ${pct}%`);
+          dlog(`Model download ${pct}%`, 'info');
+        }
+      }
+    });
+    whisperReady = true;
+    dlog('Whisper ready ✓', 'heard');
+    setStatus('', 'Speech model ready — press Start Game!');
+    if (startBtn) startBtn.disabled = false;
+  } catch(e) {
+    dlog(`Whisper load failed: ${e.message}`, 'err');
+    setStatus('', 'Model failed — use the type fallback');
+    if (startBtn) startBtn.disabled = false;
+  }
+}
+
+async function transcribeBlob(blob) {
+  if (!whisperReady) return null;
+  try {
+    // Decode and resample to 16 kHz (Whisper requirement)
+    const arrayBuf = await blob.arrayBuffer();
+    const audioCtx = new AudioContext();
+    const decoded  = await audioCtx.decodeAudioData(arrayBuf);
+    audioCtx.close();
+
+    const targetRate = 16000;
+    const offCtx   = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
+    const src       = offCtx.createBufferSource();
+    src.buffer      = decoded;
+    src.connect(offCtx.destination);
+    src.start(0);
+    const resampled = await offCtx.startRendering();
+    const float32   = resampled.getChannelData(0);
+
+    dlog(`Transcribing ${float32.length} samples (${decoded.duration.toFixed(1)} s)…`, 'api');
+    const result = await whisper(float32, { sampling_rate: targetRate });
+    const text   = result.text.trim();
+    dlog(`Whisper → "${text}"`, 'heard');
+    return text || null;
+  } catch(e) {
+    dlog(`Transcription error: ${e.message}`, 'err');
+    return null;
+  }
+}
+
+/* ============================================
    STATE
    ============================================ */
 let currentPerson = null;
@@ -844,11 +908,10 @@ function initKeyUI() {
    Web Speech API transcribes (triggered from
    the user-gesture click so Chrome allows it)
    ============================================ */
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let mediaStream   = null;
 let mediaRecorder = null;
-let recognition   = null;
-let pttTranscript = null;   // transcript from Web Speech API
+let audioChunks   = [];
+let pttTranscript = null;
 
 async function initMic() {
   if (mediaStream) return true;
@@ -871,39 +934,15 @@ function startRecording() {
   if (!mediaStream) { dlog('No stream yet', 'err'); return; }
 
   pttTranscript = null;
+  audioChunks   = [];
 
-  // ── MediaRecorder (captures audio as backup / future use) ──
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus' : 'audio/webm';
   mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
-  mediaRecorder.ondataavailable = () => {};  // not used for transcription
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
   mediaRecorder.onstop = onRecordingStop;
-  mediaRecorder.start();
+  mediaRecorder.start(100); // collect chunks every 100 ms
   dlog('MediaRecorder started', 'mic');
-
-  // ── Web Speech API — started HERE inside the user gesture ──
-  if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-    recognition.continuous     = false;
-    recognition.lang           = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart  = () => dlog('SpeechRecognition started', 'mic');
-    recognition.onspeechstart = () => dlog('speech detected...', 'mic');
-    recognition.onresult = function(e) {
-      pttTranscript = e.results[0][0].transcript.trim();
-      const conf = (e.results[0][0].confidence * 100).toFixed(0);
-      dlog(`HEARD: "${pttTranscript}" (${conf}%)`, 'heard');
-    };
-    recognition.onerror  = e => dlog(`SpeechRecognition error: ${e.error}`, 'err');
-    recognition.onend    = () => dlog('SpeechRecognition ended', 'mic');
-
-    try { recognition.start(); dlog('recognition.start() called from user gesture', 'mic'); }
-    catch(e) { dlog(`recognition.start() threw: ${e.message}`, 'err'); }
-  } else {
-    dlog('SpeechRecognition not available in this browser', 'err');
-  }
 
   // UI
   const btn = document.getElementById('btn-ptt');
@@ -913,47 +952,42 @@ function startRecording() {
   setStatus('listening', 'Speak now!');
 }
 
-// Called from mouseup/touchend
 function stopRecording() {
   if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
-
-  // Stop speech recognition first so its onresult fires before onstop
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
-    recognition = null;
-  }
-
-  dlog('Stopping recording...', 'mic');
-  // Small delay so SpeechRecognition onresult can fire before we proceed
-  setTimeout(() => {
-    if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
-  }, 300);
+  dlog('Stopping recording…', 'mic');
+  mediaRecorder.stop();
+  mediaRecorder = null;
 
   const btn = document.getElementById('btn-ptt');
   btn.classList.remove('recording');
-  btn.textContent = '⏳ Processing...';
+  btn.textContent = '⏳ Transcribing…';
   btn.disabled = true;
   setMic('idle');
-  setStatus('thinking', 'Processing...');
+  setStatus('thinking', 'Transcribing with Whisper…');
 }
 
-function onRecordingStop() {
-  dlog(`onRecordingStop — transcript="${pttTranscript}"`, 'fn');
-
+async function onRecordingStop() {
+  dlog(`onRecordingStop — ${audioChunks.length} chunks`, 'fn');
   if (!gameActive) { resetPTT(); return; }
 
-  if (pttTranscript) {
-    // Web Speech API gave us a transcript — send to Claude for the answer
+  if (audioChunks.length === 0) {
+    dlog('No audio captured', 'err');
+    setHost("No audio captured — try again or type below.", '');
+    waitingForQ = true; resetPTT(); return;
+  }
+
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  dlog(`Blob: ${(blob.size/1024).toFixed(1)} KB — sending to Whisper`, 'mic');
+
+  const transcript = await transcribeBlob(blob);
+  if (transcript) {
     waitingForQ = false;
-    showHeard(pttTranscript);
-    handleQuestion(pttTranscript);
+    showHeard(transcript);
+    handleQuestion(transcript);
   } else {
-    // No transcript — ask student to type
-    dlog('No transcript — falling back to type input', 'info');
-    setHost("Didn't catch that — please type your question below!", '');
-    setStatus('', 'Type your question below');
-    waitingForQ = true;
-    resetPTT();
+    dlog('Whisper returned empty — type fallback', 'info');
+    setHost("Couldn't make that out — please type your question below!", '');
+    waitingForQ = true; resetPTT();
   }
 }
 
@@ -981,11 +1015,11 @@ function listenForQuestion() {
 }
 
 function killRecognition() {
-  if (recognition) { try { recognition.abort(); } catch(e) {} recognition = null; }
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     try { mediaRecorder.stop(); } catch(e) {}
     mediaRecorder = null;
   }
+  audioChunks = [];
   dlog('killRecognition() — stopped', 'info');
 }
 
@@ -1297,9 +1331,18 @@ function escapeHtml(str) {
 /* ============================================
    INIT
    ============================================ */
+// Expose functions called from HTML onclick attributes (required for ES modules)
+Object.assign(window, {
+  saveKey, startGame, newRound, revealPerson,
+  togglePauseLog, copyLog, clearDebug, submitTyped
+});
+
 initKeyUI();
 dlog(`Page loaded — MediaRecorder: ${typeof MediaRecorder !== 'undefined' ? 'supported' : 'NOT SUPPORTED'}`, 'info');
 dlog(`API key: ${apiKey ? 'present' : 'MISSING'}`, 'info');
+
+// Start loading Whisper in the background immediately
+initWhisper();
 
 // Wire push-to-talk button (mouse + touch)
 const pttBtn = document.getElementById('btn-ptt');
