@@ -840,169 +840,121 @@ function initKeyUI() {
 }
 
 /* ============================================
-   PUSH-TO-TALK via MediaRecorder
+   PUSH-TO-TALK — MediaRecorder captures audio,
+   Web Speech API transcribes (triggered from
+   the user-gesture click so Chrome allows it)
    ============================================ */
-let mediaStream    = null;
-let mediaRecorder  = null;
-let audioChunks    = [];
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let mediaStream   = null;
+let mediaRecorder = null;
+let recognition   = null;
+let pttTranscript = null;   // transcript from Web Speech API
 
 async function initMic() {
-  if (mediaStream) return true; // already have permission
+  if (mediaStream) return true;
   try {
-    dlog('Requesting mic via getUserMedia...', 'mic');
+    dlog('getUserMedia — requesting mic...', 'mic');
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     dlog('Mic permission granted', 'mic');
     return true;
   } catch(e) {
-    dlog(`Mic permission denied: ${e.message}`, 'err');
-    setHost('⛔ Microphone access denied. Click the 🔒 in the address bar, allow the mic, then refresh.', '');
+    dlog(`Mic denied: ${e.message}`, 'err');
+    setHost('⛔ Mic access denied. Click the 🔒 in the address bar, allow mic, refresh.', '');
     setStatus('', '⛔ Mic blocked');
     return false;
   }
 }
 
+// Called directly from mousedown/touchstart — IS a user gesture
 function startRecording() {
   if (!gameActive || !waitingForQ || mediaRecorder) return;
-  if (!mediaStream) { dlog('No stream — call initMic first', 'err'); return; }
+  if (!mediaStream) { dlog('No stream yet', 'err'); return; }
 
-  audioChunks = [];
+  pttTranscript = null;
+
+  // ── MediaRecorder (captures audio as backup / future use) ──
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus' : 'audio/webm';
-  dlog(`Starting MediaRecorder (${mimeType})`, 'mic');
-
   mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
-  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.ondataavailable = () => {};  // not used for transcription
   mediaRecorder.onstop = onRecordingStop;
   mediaRecorder.start();
+  dlog('MediaRecorder started', 'mic');
 
+  // ── Web Speech API — started HERE inside the user gesture ──
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous     = false;
+    recognition.lang           = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart  = () => dlog('SpeechRecognition started', 'mic');
+    recognition.onspeechstart = () => dlog('speech detected...', 'mic');
+    recognition.onresult = function(e) {
+      pttTranscript = e.results[0][0].transcript.trim();
+      const conf = (e.results[0][0].confidence * 100).toFixed(0);
+      dlog(`HEARD: "${pttTranscript}" (${conf}%)`, 'heard');
+    };
+    recognition.onerror  = e => dlog(`SpeechRecognition error: ${e.error}`, 'err');
+    recognition.onend    = () => dlog('SpeechRecognition ended', 'mic');
+
+    try { recognition.start(); dlog('recognition.start() called from user gesture', 'mic'); }
+    catch(e) { dlog(`recognition.start() threw: ${e.message}`, 'err'); }
+  } else {
+    dlog('SpeechRecognition not available in this browser', 'err');
+  }
+
+  // UI
   const btn = document.getElementById('btn-ptt');
   btn.classList.add('recording');
   btn.textContent = '🔴 RECORDING — RELEASE TO SEND';
   setMic('listening');
-  setStatus('listening', 'Recording — speak now!');
-  dlog('Recording started', 'mic');
+  setStatus('listening', 'Speak now!');
 }
 
+// Called from mouseup/touchend
 function stopRecording() {
   if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
-  dlog('Recording stopped — processing...', 'mic');
-  mediaRecorder.stop();
-  mediaRecorder = null;
+
+  // Stop speech recognition first so its onresult fires before onstop
+  if (recognition) {
+    try { recognition.stop(); } catch(e) {}
+    recognition = null;
+  }
+
+  dlog('Stopping recording...', 'mic');
+  // Small delay so SpeechRecognition onresult can fire before we proceed
+  setTimeout(() => {
+    if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
+  }, 300);
 
   const btn = document.getElementById('btn-ptt');
   btn.classList.remove('recording');
   btn.textContent = '⏳ Processing...';
   btn.disabled = true;
   setMic('idle');
-  setStatus('thinking', 'Processing audio...');
+  setStatus('thinking', 'Processing...');
 }
 
-async function onRecordingStop() {
-  if (audioChunks.length === 0) {
-    dlog('No audio captured', 'err');
-    resetPTT();
-    return;
-  }
-  const blob = new Blob(audioChunks, { type: 'audio/webm' });
-  dlog(`Audio blob: ${(blob.size/1024).toFixed(1)} KB`, 'mic');
+function onRecordingStop() {
+  dlog(`onRecordingStop — transcript="${pttTranscript}"`, 'fn');
 
-  // Convert to base64
-  const base64 = await blobToBase64(blob);
-  dlog('Sending audio to Claude for transcription + answer...', 'api');
+  if (!gameActive) { resetPTT(); return; }
 
-  if (!waitingForQ || !gameActive) { resetPTT(); return; }
-  waitingForQ = false;
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-opus-4-5',
-        max_tokens: 120,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `You are a hype game show host. The secret mystery person is "${currentPerson}".
-A student just spoke a yes/no question or a guess into this audio recording.
-First, transcribe what they said (write it after "HEARD:").
-Then, if it is a GUESS (e.g. "Is it X?" or "Is the person X?"): determine if they correctly guessed ${currentPerson}. If correct start your answer with CORRECT. If wrong start with NO.
-If it is a YES/NO question: answer YES or NO (whichever is accurate).
-After YES/NO/CORRECT/NO, add ONE short energetic sentence (max 15 words). Never reveal the person's name in a wrong guess.
-Format your reply EXACTLY as:
-HEARD: [what they said]
-ANSWER: [YES/NO/CORRECT/NO + hype sentence]`
-            },
-            {
-              type: 'document',
-              source: { type: 'base64', media_type: 'audio/webm', data: base64 }
-            }
-          ]
-        }]
-      })
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      dlog(`API error ${res.status}: ${err.error?.message}`, 'err');
-
-      // Claude may not support audio — fall back to asking user to type
-      dlog('Audio not supported by API — showing type fallback', 'info');
-      setHost("Couldn't process audio. Please type your question below.", '');
-      waitingForQ = true;
-      resetPTT();
-      return;
-    }
-
-    const data = await res.json();
-    const raw = data.content?.[0]?.text?.trim() || '';
-    dlog(`Claude raw: ${raw}`, 'api');
-
-    // Parse HEARD and ANSWER lines
-    const heardMatch  = raw.match(/HEARD:\s*(.+)/i);
-    const answerMatch = raw.match(/ANSWER:\s*(.+)/i);
-    const transcript  = heardMatch  ? heardMatch[1].trim()  : '(unclear)';
-    const reply       = answerMatch ? answerMatch[1].trim()  : raw;
-
-    dlog(`Transcript: "${transcript}"`, 'heard');
-    showHeard(transcript);
-
-    const upper = reply.toUpperCase();
-    const isCorrect = upper.startsWith('CORRECT');
-    const answerYes = upper.startsWith('YES');
-
-    setHost(reply, '');
-    if (isCorrect) { handleWin(); return; }
-
-    questionHistory.push({ q: transcript, a: answerYes ? 'YES' : 'NO', cls: answerYes ? 'yes' : 'no' });
-    updateQList();
-    speak(reply, () => {
-      waitingForQ = true;
-      resetPTT();
-    });
-
-  } catch(e) {
-    dlog(`Fetch error: ${e.message}`, 'err');
-    setHost('Network error — check your connection.', '');
+  if (pttTranscript) {
+    // Web Speech API gave us a transcript — send to Claude for the answer
+    waitingForQ = false;
+    showHeard(pttTranscript);
+    handleQuestion(pttTranscript);
+  } else {
+    // No transcript — ask student to type
+    dlog('No transcript — falling back to type input', 'info');
+    setHost("Didn't catch that — please type your question below!", '');
+    setStatus('', 'Type your question below');
     waitingForQ = true;
     resetPTT();
   }
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }
 
 function resetPTT() {
@@ -1012,7 +964,7 @@ function resetPTT() {
   btn.classList.remove('recording');
   btn.textContent = '🎙 HOLD TO SPEAK';
   setMic('idle');
-  if (waitingForQ && gameActive) setStatus('listening', 'Ready — hold the button to ask!');
+  if (waitingForQ && gameActive) setStatus('listening', 'Ready — hold the button and speak!');
 }
 
 function listenForQuestion() {
@@ -1020,24 +972,21 @@ function listenForQuestion() {
     dlog(`listenForQuestion skipped — gameActive=${gameActive} waitingForQ=${waitingForQ} isSpeaking=${isSpeaking}`, 'info');
     return;
   }
-  dlog('listenForQuestion — showing input area', 'fn');
+  dlog('listenForQuestion — ready for input', 'fn');
   document.getElementById('input-area').style.display = 'flex';
-  resetPTT();
   document.getElementById('type-input').value = '';
   document.getElementById('btn-ask').disabled = false;
+  resetPTT();
   setHost('Hold the button and ask your yes/no question!', '');
-  setStatus('listening', 'Ready — hold the button to ask!');
 }
 
 function killRecognition() {
-  // Stop any in-progress recording
+  if (recognition) { try { recognition.abort(); } catch(e) {} recognition = null; }
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     try { mediaRecorder.stop(); } catch(e) {}
     mediaRecorder = null;
   }
-  audioChunks = [];
-  isListening = false;
-  dlog('killRecognition() — recorder stopped', 'info');
+  dlog('killRecognition() — stopped', 'info');
 }
 
 function submitTyped() {
