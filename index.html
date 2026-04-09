@@ -142,6 +142,7 @@
 
     const FEMALE_NAMES = new Set(["Oprah Winfrey","Marilyn Monroe","Rosa Parks","Amelia Earhart","Eleanor Roosevelt","Madonna","Hillary Clinton","Katharine Hepburn","Billie Holiday","Serena Williams","Meryl Streep","Joan of Arc","Catherine the Great","Ada Lovelace","Cleopatra","Taylor Swift","Zendaya","Billie Eilish","Selena Gomez","Ariana Grande","Kim Kardashian","Beyoncé","Rihanna","Lana Del Rey","Dua Lipa","Adele"]);
     let currentPerson = "", gameStarted = false, roundWon = false, recognition = null, heardResult = false, isListening = false, isThinking = false, isSpeaking = false, micStream = null, audioContext = null, analyser = null, sourceNode = null, frameId = null, monitoringPaused = false, questions = [], listenTimeoutId = null, finalizeTimeoutId = null, serverReady = false, lastHandledQuestion = "", latestTranscript = "";
+    const lifeStatusCache = new Map();
 
     function setState(mode, detail) {
       orb.className = "orb"; fdot.className = "fdot";
@@ -198,6 +199,35 @@
       if (/^(is it|is this|is the person|is he|is she).*(a man|male)$/.test(q)) return { feedback: isFemale ? "no" : "yes", guessedCorrectly: false };
       if (/^(is it|is this|is the person|is he|is she).*(a woman|female)$/.test(q)) return { feedback: isFemale ? "yes" : "no", guessedCorrectly: false };
       return null;
+    }
+    function isAliveQuestion(question) {
+      const q = normalizeName(question);
+      return /^(is|was)\s+(he|she|it|this person|the person)\s+(still\s+)?(alive|living)\b/.test(q);
+    }
+    async function fetchWikipediaRecord(name) {
+      const titleRes = await fetch("https://en.wikipedia.org/w/api.php?origin=*&action=query&prop=pageprops&redirects=1&titles=" + encodeURIComponent(name) + "&format=json");
+      if (!titleRes.ok) throw new Error("Wikipedia lookup failed.");
+      const titleData = await titleRes.json();
+      const pages = Object.values(titleData.query?.pages || {});
+      const page = pages.find((item) => !item.missing);
+      const wikidataId = page?.pageprops?.wikibase_item;
+      if (!wikidataId) throw new Error("Wikipedia did not expose a Wikidata record for this person.");
+      return wikidataId;
+    }
+    async function fetchLifeStatus(name) {
+      if (lifeStatusCache.has(name)) return lifeStatusCache.get(name);
+
+      const wikidataId = await fetchWikipediaRecord(name);
+      const entityRes = await fetch("https://www.wikidata.org/w/api.php?origin=*&action=wbgetentities&ids=" + encodeURIComponent(wikidataId) + "&format=json&props=claims");
+      if (!entityRes.ok) throw new Error("Wikidata lookup failed.");
+      const entityData = await entityRes.json();
+      const entity = entityData.entities?.[wikidataId];
+      if (!entity) throw new Error("Wikidata did not return a person record.");
+
+      const hasDeathDate = Boolean(entity.claims?.P570?.length);
+      const result = hasDeathDate ? "no" : "yes";
+      lifeStatusCache.set(name, result);
+      return result;
     }
     function clearListenTimeout() {
       if (listenTimeoutId) {
@@ -334,6 +364,7 @@
       if (!question) { setFeedback("I couldn't hear that"); setHost("I couldn't hear that.", "Try again with a short yes-or-no question."); return; }
       const localGuess = detectLocalGuess(question);
       const localJudged = judgeLocally(question);
+      const aliveQuestion = isAliveQuestion(question);
       if (!isYesNoQuestion(question) && !localGuess) {
         setFeedback("that is not a yes or no question");
         addQuestion(question, "that is not a yes or no question");
@@ -347,6 +378,24 @@
         setHost(localJudged.feedback, "That exact question was processed locally.");
         await speakHost(localJudged.feedback);
         return;
+      }
+      if (aliveQuestion) {
+        isThinking = true; micBtn.disabled = true; setState("thinking", "Checking whether this person is still alive via Wikipedia.");
+        try {
+          const lifeAnswer = await fetchLifeStatus(currentPerson);
+          setFeedback(lifeAnswer, lifeAnswer === "yes" ? "yes" : "no");
+          addQuestion(question, lifeAnswer);
+          setHost(lifeAnswer, "This answer was checked from the person's Wikipedia-linked Wikidata record.");
+          await speakHost(lifeAnswer);
+          return;
+        } catch (error) {
+          setFeedback("waiting");
+          setHost("I heard the question, but I could not check whether they are still alive.", error.message);
+          return;
+        } finally {
+          isThinking = false;
+          if (!roundWon) { micBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+        }
       }
       if (!serverReady) {
         setFeedback("waiting");
