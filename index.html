@@ -809,12 +809,11 @@ function initKeyUI() {
    SPEECH RECOGNITION
    ============================================ */
 function killRecognition() {
-  // Null out all handlers BEFORE aborting so nothing fires
   if (recognition) {
-    recognition.onstart  = null;
-    recognition.onresult = null;
-    recognition.onend    = null;
-    recognition.onerror  = null;
+    recognition.onstart       = null;
+    recognition.onresult      = null;
+    recognition.onend         = null;
+    recognition.onerror       = null;
     recognition.onspeechstart = null;
     recognition.onspeechend   = null;
     recognition.onnomatch     = null;
@@ -822,66 +821,82 @@ function killRecognition() {
     recognition = null;
   }
   isListening = false;
-  dlog('killRecognition() — old object discarded', 'info');
+  dlog('killRecognition() — mic released', 'info');
 }
 
 function setupRecognition() {
   if (!SpeechRecognition) {
+    dlog('SpeechRecognition NOT supported!', 'err');
     setHost("Your browser doesn't support speech recognition. Please use Chrome.", "");
-    dlog('SpeechRecognition API not available!', 'err');
     return;
   }
-  // Always create a brand-new object — never reuse after abort
+
   recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.lang = 'en-US';
+  recognition.continuous     = true;   // stays open — no rapid restart cycles
+  recognition.lang           = 'en-US';
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
 
   recognition.onstart = function() {
-        dlog('recognition.onstart — mic OPEN', 'mic');
+    isListening = true;
+    dlog('mic OPEN (continuous)', 'mic');
+    setMic('listening');
+    setStatus('listening', 'Listening — ask your question!');
   };
 
   recognition.onresult = function(e) {
-    isListening = false;
-    const transcript = e.results[0][0].transcript.trim();
-    const conf = (e.results[0][0].confidence * 100).toFixed(0);
+    // With continuous=true, results accumulate — always read the latest final one
+    const result = e.results[e.results.length - 1];
+    if (!result.isFinal) return;
+    const transcript = result[0].transcript.trim();
+    const conf = (result[0].confidence * 100).toFixed(0);
     dlog(`HEARD: "${transcript}" (${conf}% confidence)`, 'heard');
+
+    if (!waitingForQ || !gameActive || isSpeaking) {
+      dlog(`ignored — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'info');
+      return;
+    }
+    waitingForQ = false;
     showHeard(transcript);
     handleQuestion(transcript);
   };
 
-  recognition.onspeechstart = function() { dlog('speech detected — recording...', 'mic'); };
+  recognition.onspeechstart = function() { dlog('speech detected...', 'mic'); };
   recognition.onspeechend   = function() { dlog('speech ended', 'mic'); };
-  recognition.onnomatch     = function() { dlog('no match found for speech', 'err'); };
+  recognition.onnomatch     = function() { dlog('no match', 'err'); };
 
   recognition.onend = function() {
-    isListening = false; // always resets here — onend is guaranteed to fire
-    dlog(`recognition.onend — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'mic');
+    isListening = false;
+    dlog(`onend — gameActive=${gameActive} waitingForQ=${waitingForQ}`, 'mic');
     setMic('idle');
-    if (waitingForQ && gameActive && !isSpeaking) {
-      setTimeout(() => listenForQuestion(), 500);
+    // Restart automatically if game is still running
+    if (gameActive) {
+      setTimeout(() => {
+        if (gameActive && recognition && !isListening) {
+          dlog('auto-restarting continuous recognition', 'mic');
+          try { recognition.start(); } catch(e) { dlog('restart threw: ' + e.message, 'err'); }
+        }
+      }, 300);
     }
   };
 
   recognition.onerror = function(e) {
-    // DO NOT restart here — onend always fires after onerror, it will restart
     dlog(`ERROR: ${e.error}`, 'err');
+    // Fatal errors — stop the loop
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      gameActive = false;
       setMic('idle');
-      setStatus('', '⛔ Microphone blocked — click the 🔒 in the address bar, allow mic, then refresh.');
-      setHost('⛔ Microphone access is blocked. Click the padlock icon in the address bar, allow the microphone, then refresh.', '');
-      waitingForQ = false;
+      setStatus('', '⛔ Mic blocked — click the 🔒 in the address bar, allow mic, refresh.');
+      setHost('⛔ Microphone access is blocked. Click the padlock icon in the address bar, allow mic, then refresh.', '');
     } else if (e.error === 'audio-capture') {
+      gameActive = false;
       setMic('idle');
       setStatus('', '⛔ No microphone found — plug one in and refresh.');
       setHost('⛔ No microphone detected. Please connect a microphone and refresh.', '');
-      waitingForQ = false;
     } else if (e.error === 'network') {
-      setStatus('', '⚠️ Speech needs internet — check your connection.');
-      setHost('⚠️ Speech recognition needs internet access. Check your connection.', '');
+      setStatus('', '⚠️ Network error — speech needs internet.');
     }
-    // onend will fire next and handle the restart
+    // onend fires after onerror and handles restart
   };
 }
 
@@ -890,20 +905,23 @@ function listenForQuestion() {
     dlog(`listenForQuestion skipped — gameActive=${gameActive} waitingForQ=${waitingForQ} isSpeaking=${isSpeaking}`, 'info');
     return;
   }
+  showTypeRow(true);
+  setHost("Go ahead, ask a yes/no question...", "");
+
   if (isListening) {
-    dlog('listenForQuestion skipped — already listening', 'info');
+    // Already open — just update the UI, onresult will pick up the next utterance
+    dlog('mic already open — ready for next question', 'info');
+    setMic('listening');
+    setStatus('listening', 'Listening — ask your question!');
     return;
   }
-  dlog('listenForQuestion — creating fresh recognition & starting', 'fn');
-  killRecognition();   // discard any lingering object; sets isListening=false
-  setupRecognition();  // fresh object with clean handlers
-  isListening = true;  // set AFTER kill, BEFORE start
-  showTypeRow(true);
-  setMic('listening');
-  setStatus('listening', 'Listening — ask your question!');
-  setHost("Go ahead, ask a yes/no question...", "");
-  try { recognition.start(); } catch(e) {
-    isListening = false;
+
+  // First time this round — create the recognition object and start it once
+  if (!recognition) setupRecognition();
+  dlog('listenForQuestion — starting mic', 'fn');
+  try {
+    recognition.start();
+  } catch(e) {
     dlog(`recognition.start() threw: ${e.message}`, 'err');
   }
 }
@@ -1020,7 +1038,8 @@ function newRound() {
   synth.cancel();
   waitingForQ = false;
   gameActive = false;
-  killRecognition();
+  killRecognition();    // tear down old object; fresh one created in listenForQuestion
+  setupRecognition();   // create now so mic permission prompt happens before TTS ends
 
   currentPerson = FAMOUS_PEOPLE[Math.floor(Math.random() * FAMOUS_PEOPLE.length)];
   dlog(`Mystery person: ${currentPerson}`, 'api');
