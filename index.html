@@ -110,7 +110,7 @@
       <section class="s-card">
         <p class="label">API Key</p>
         <p id="keyVal" class="s-value">Checking server...</p>
-        <p id="keyMeta" class="small">The game checks the local server for Claude key registration.</p>
+        <p id="keyMeta" class="small">The game checks a Netlify Function for Claude key registration.</p>
       </section>
     </footer>
   </div>
@@ -262,11 +262,11 @@
         const data = await res.json();
         serverReady = Boolean(data.hasClaudeKey);
         keyVal.textContent = serverReady ? "Registered" : "Missing";
-        keyMeta.textContent = serverReady ? "Claude is available through the local server." : "Start the app through the local server with `CLAUDE_KEY` set.";
+        keyMeta.textContent = serverReady ? "Claude is available through the deployed Netlify Function." : "Add `CLAUDE_KEY` to Netlify and redeploy so the function can see it.";
       } catch (error) {
         serverReady = false;
-        keyVal.textContent = "Server not running";
-        keyMeta.textContent = "Run `node server.js` so the browser can check whether `CLAUDE_KEY` is registered.";
+        keyVal.textContent = "Function unavailable";
+        keyMeta.textContent = "This site could not reach the Netlify Function that reports Claude key status.";
       }
     }
     async function callClaude(question) {
@@ -301,9 +301,9 @@
       }
       if (!serverReady) {
         setFeedback("waiting");
-        setHost("Claude is not configured yet.", "Run `node server.js` from this folder with your `CLAUDE_KEY` environment variable set.");
+        setHost("Claude is not configured yet.", "Add `CLAUDE_KEY` in Netlify environment variables for Functions and redeploy the site.");
         keyVal.textContent = "Missing";
-        keyMeta.textContent = "The browser can only use the key through the local `/api/judge` backend.";
+        keyMeta.textContent = "The browser can only use the key through the Netlify `/api/judge` function.";
         queueAutoListen();
         return;
       }
