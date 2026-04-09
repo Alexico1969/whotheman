@@ -749,7 +749,7 @@ let recognition = null;
 let isSpeaking = false;
 let gameActive = false;
 let waitingForQ = false;
-let isListening = false;
+
 let apiKey = localStorage.getItem('wtm_api_key') || '';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -779,11 +779,29 @@ function initKeyUI() {
 /* ============================================
    SPEECH RECOGNITION
    ============================================ */
+function killRecognition() {
+  // Null out all handlers BEFORE aborting so nothing fires
+  if (recognition) {
+    recognition.onstart  = null;
+    recognition.onresult = null;
+    recognition.onend    = null;
+    recognition.onerror  = null;
+    recognition.onspeechstart = null;
+    recognition.onspeechend   = null;
+    recognition.onnomatch     = null;
+    try { recognition.abort(); } catch(e) {}
+    recognition = null;
+  }
+    dlog('killRecognition() — old object discarded', 'info');
+}
+
 function setupRecognition() {
   if (!SpeechRecognition) {
     setHost("Your browser doesn't support speech recognition. Please use Chrome.", "");
+    dlog('SpeechRecognition API not available!', 'err');
     return;
   }
+  // Always create a brand-new object — never reuse after abort
   recognition = new SpeechRecognition();
   recognition.continuous = false;
   recognition.lang = 'en-US';
@@ -791,13 +809,11 @@ function setupRecognition() {
   recognition.maxAlternatives = 1;
 
   recognition.onstart = function() {
-    isListening = true;
-    dlog('recognition.onstart — mic OPEN', 'mic');
+        dlog('recognition.onstart — mic OPEN', 'mic');
   };
 
   recognition.onresult = function(e) {
-    isListening = false;
-    const transcript = e.results[0][0].transcript.trim();
+        const transcript = e.results[0][0].transcript.trim();
     const conf = (e.results[0][0].confidence * 100).toFixed(0);
     dlog(`HEARD: "${transcript}" (${conf}% confidence)`, 'heard');
     showHeard(transcript);
@@ -809,20 +825,16 @@ function setupRecognition() {
   recognition.onnomatch     = function() { dlog('no match found for speech', 'err'); };
 
   recognition.onend = function() {
-    isListening = false;
-    dlog(`recognition.onend — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'mic');
+        dlog(`recognition.onend — waitingForQ=${waitingForQ} gameActive=${gameActive} isSpeaking=${isSpeaking}`, 'mic');
     setMic('idle');
     if (waitingForQ && gameActive && !isSpeaking) {
-      setTimeout(() => listenForQuestion(), 700);
+      setTimeout(() => listenForQuestion(), 500);
     }
   };
 
   recognition.onerror = function(e) {
-    isListening = false;
-    setMic('idle');
-    if (e.error === 'aborted') { dlog('recognition aborted (intentional)', 'info'); return; }
-    dlog(`ERROR: ${e.error} — ${e.message || ''}`, 'err');
-    console.error('SpeechRecognition error:', e.error);
+        setMic('idle');
+    dlog(`ERROR: ${e.error}`, 'err');
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       setStatus('', '⛔ Microphone blocked — click the 🔒 in the address bar, allow mic, then refresh.');
       setHost('⛔ Microphone access is blocked. Click the padlock icon in the address bar, allow the microphone, then refresh.', '');
@@ -839,8 +851,9 @@ function setupRecognition() {
       setStatus('', '⚠️ Speech needs internet — check your connection.');
       setHost('⚠️ Speech recognition needs internet access. Check your connection.', '');
     }
+    // For no-speech or other errors, restart
     if (waitingForQ && gameActive) {
-      setTimeout(() => listenForQuestion(), 1000);
+      setTimeout(() => listenForQuestion(), 500);
     }
   };
 }
@@ -850,16 +863,14 @@ function listenForQuestion() {
     dlog(`listenForQuestion skipped — gameActive=${gameActive} waitingForQ=${waitingForQ} isSpeaking=${isSpeaking}`, 'info');
     return;
   }
-  if (isListening) { dlog('listenForQuestion skipped — already listening', 'info'); return; }
-  dlog('listenForQuestion — calling recognition.start()', 'fn');
+  dlog('listenForQuestion — creating fresh recognition & starting', 'fn');
   showTypeRow(true);
-  if (!recognition) setupRecognition();
+  setupRecognition(); // always fresh object
   setMic('listening');
   setStatus('listening', 'Listening — ask your question!');
   setHost("Go ahead, ask a yes/no question...", "");
   try { recognition.start(); } catch(e) {
-    isListening = false;
-    dlog(`recognition.start() threw: ${e.message}`, 'err');
+        dlog(`recognition.start() threw: ${e.message}`, 'err');
   }
 }
 
@@ -876,7 +887,7 @@ function submitTyped() {
   if (!q || !gameActive || !waitingForQ) return;
   inp.disabled = true;
   document.getElementById('btn-ask').disabled = true;
-  if (recognition) try { recognition.abort(); } catch(e) {}
+  killRecognition();
   showHeard(q);
   handleQuestion(q);
 }
@@ -975,8 +986,7 @@ function newRound() {
   synth.cancel();
   waitingForQ = false;
   gameActive = false;
-  isListening = false;
-  if (recognition) try { recognition.abort(); } catch(e) {}
+  killRecognition();
 
   currentPerson = FAMOUS_PEOPLE[Math.floor(Math.random() * FAMOUS_PEOPLE.length)];
   dlog(`Mystery person: ${currentPerson}`, 'api');
@@ -1011,7 +1021,6 @@ async function handleQuestion(question) {
 
   const lower = question.toLowerCase();
   const isGuess = lower.includes("is it") || lower.includes("are you") ||
-    lower.includes("is the person") || lower.includes("is this") ||
     lower.includes("is the person") || lower.includes("is this") ||
     lower.includes("could it be") || lower.includes("is she") ||
     lower.includes("is he");
@@ -1116,7 +1125,7 @@ function handleWin() {
 function revealPerson() {
   gameActive = false;
   waitingForQ = false;
-  if (recognition) try { recognition.abort(); } catch(e) {}
+  killRecognition();
   synth.cancel();
   hideHeard();
   showTypeRow(false);
@@ -1177,7 +1186,6 @@ function escapeHtml(str) {
    INIT
    ============================================ */
 initKeyUI();
-setupRecognition();
 dlog(`Page loaded — SpeechRecognition: ${SpeechRecognition ? 'supported' : 'NOT SUPPORTED'}`, 'info');
 dlog(`API key: ${apiKey ? 'present' : 'MISSING'}`, 'info');
 
