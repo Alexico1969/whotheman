@@ -626,6 +626,7 @@
       }
       if (occupationIntent) {
         isThinking = true; micBtn.disabled = true; setState("thinking", "Checking this fact on Wikipedia.");
+        let wikiAnswered = false;
         try {
           const profile = await fetchPersonProfile(currentPerson);
           const feedbackText = profileMatchesOccupation(profile, occupationIntent) ? "yes" : "no";
@@ -633,20 +634,18 @@
           addQuestion(question, feedbackText);
           setHost(feedbackText, "This answer was checked from the person's Wikipedia summary and categories.");
           await speakHost(feedbackText);
+          wikiAnswered = true;
           return;
         } catch (error) {
-          setFeedback("not sure");
-          addQuestion(question, "not sure");
-          setHost("not sure", "The host could not verify that one confidently.");
-          await speakHost("Not sure.");
-          return;
+          // Wikipedia failed — fall through to Claude
         } finally {
           isThinking = false;
-          if (!roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+          if (wikiAnswered && !roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
         }
       }
       if (originIntent) {
         isThinking = true; micBtn.disabled = true; setState("thinking", "Checking where this person is from.");
+        let wikiAnswered = false;
         try {
           const profile = await fetchPersonProfile(currentPerson);
           const feedbackText = profileMatchesOrigin(profile, originIntent) ? "yes" : "no";
@@ -654,20 +653,18 @@
           addQuestion(question, feedbackText);
           setHost(feedbackText, "This answer was checked from the person's Wikipedia summary and categories.");
           await speakHost(feedbackText);
+          wikiAnswered = true;
           return;
         } catch (error) {
-          setFeedback("not sure");
-          addQuestion(question, "not sure");
-          setHost("not sure", "The host could not verify that one confidently.");
-          await speakHost("Not sure.");
-          return;
+          // Wikipedia failed — fall through to Claude
         } finally {
           isThinking = false;
-          if (!roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+          if (wikiAnswered && !roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
         }
       }
       if (lifeQuestionIntent) {
         isThinking = true; micBtn.disabled = true; setState("thinking", "Checking whether this person is still alive via Wikipedia.");
+        let wikiAnswered = false;
         try {
           const lifeStatus = await fetchLifeStatus(currentPerson);
           const feedbackText = lifeQuestionIntent === "alive" ? (lifeStatus === "alive" ? "yes" : "no") : (lifeStatus === "dead" ? "yes" : "no");
@@ -675,16 +672,13 @@
           addQuestion(question, feedbackText);
           setHost(feedbackText, "This answer was checked from the person's Wikipedia categories.");
           await speakHost(feedbackText);
+          wikiAnswered = true;
           return;
         } catch (error) {
-          setFeedback("not sure");
-          addQuestion(question, "not sure");
-          setHost("not sure", "The host could not verify that one confidently.");
-          await speakHost("Not sure.");
-          return;
+          // Wikipedia failed — fall through to Claude
         } finally {
           isThinking = false;
-          if (!roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
+          if (wikiAnswered && !roundWon) { micBtn.disabled = false; guessBtn.disabled = false; setState("", "Ready for your next yes-or-no question."); }
         }
       }
       if (!serverReady) {
